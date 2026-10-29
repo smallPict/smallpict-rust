@@ -111,6 +111,19 @@ let status = client.get_job_status("job_id").await?;
 println!("{:?} at quality {:?}", status.mode_applied, status.quality_applied);
 ```
 
+### 4. Upload Folder
+
+`folder` stores the optimized file under a folder of your account (1-3 segments such as `products/shoes`). The server lower-cases it and answers HTTP 400 `invalid_folder` (`SmallPictError::Validation`) for a malformed value; the SDK rejects empty segments, `..` and more than 3 segments before sending.
+
+```rust
+let options = OptimizeOptions::builder().folder("products/shoes").build();
+let result = client.optimize(&image_bytes, Some(options)).await?;
+
+// The job status reports the stored folder (absent without one).
+let status = client.get_job_status(&result.job_id).await?;
+println!("{:?}", status.folder);
+```
+
 ---
 
 ## 📊 Account Quota & Edge CDN Purge
@@ -123,7 +136,12 @@ println!("Plan: {}, Quota Used: {:.2}%", quota.plan, quota.quota_percentage);
 // 2. Invalidate Edge CDN cache
 let purge = client.purge_cdn(&["https://cdn.smallpict.app/opt/hero-banner.avif"], smallpict::PurgeType::Url).await?;
 println!("{}", purge.message);
+
+// 3. Purge every file delivered under one upload folder
+client.purge_folder("products/shoes").await?;
 ```
+
+Folder purges (10 per hour) and `PurgeType::All` purges (2 per hour) are limited per account. Past the limit the server answers HTTP 429 `purge_rate_limited` (`SmallPictError::RateLimit`), which the SDK does not retry automatically.
 
 ---
 

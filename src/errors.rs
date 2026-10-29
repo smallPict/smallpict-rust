@@ -152,3 +152,16 @@ impl SmallPictError {
         matches!(self, Self::Server { .. })
     }
 }
+
+/// True for the 429 `purge_rate_limited` body: the hourly folder/all purge limit, which
+/// does not reset within a retry window, so the request is not retried.
+pub(crate) fn is_purge_rate_limited(body: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| {
+            v.pointer("/error/code")?
+                .as_str()
+                .map(|c| c == "purge_rate_limited")
+        })
+        .unwrap_or(false)
+}

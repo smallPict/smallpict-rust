@@ -1,8 +1,8 @@
 use crate::crypto::{self, EMPTY_SHA256};
-use crate::errors::{SecretRedacted, SmallPictError};
+use crate::errors::{is_purge_rate_limited, SecretRedacted, SmallPictError};
 use crate::models::{
-    FallbackMode, JobStatusResult, OptimizeOptions, OptimizeResult, PurgeResponse, PurgeType,
-    QuotaResponse,
+    check_folder, FallbackMode, JobStatusResult, OptimizeOptions, OptimizeResult, PurgeResponse,
+    PurgeType, QuotaResponse,
 };
 use bytes::Bytes;
 use rand::Rng;
@@ -46,6 +46,9 @@ impl BlockingClient {
     ) -> Result<OptimizeResult, SmallPictError> {
         let mut opts = options.unwrap_or_default();
         opts.mode = opts.wire_mode()?;
+        if let Some(ref folder) = opts.folder {
+            check_folder(folder)?;
+        }
         let filename = opts.filename.clone().unwrap_or_else(|| "image.jpg".into());
         let mime_type = opts
             .mime_type
@@ -120,6 +123,10 @@ impl BlockingClient {
                         .get("upload_url")
                         .and_then(|v| v.as_str())
                         .map(ToString::to_string),
+                    folder: val
+                        .get("folder")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string),
                     data: None,
                 })
             }
@@ -136,6 +143,7 @@ impl BlockingClient {
                         bytes_saved: 0,
                         savings_percentage: 0.0,
                         upload_url: None,
+                        folder: None,
                         data: Some(data.to_vec()),
                     });
                 }
@@ -179,6 +187,21 @@ impl BlockingClient {
         let payload = serde_json::json!({
             "purge_type": purge_type.to_string(),
             "urls": url_list,
+        });
+
+        let val = self.request(reqwest::Method::POST, "/v1/purge", Some(payload), None)?;
+        serde_json::from_value(val).map_err(SmallPictError::from)
+    }
+
+    /// Purges every file delivered under one upload folder (`purge_type: "folder"`).
+    /// A malformed folder returns `SmallPictError::Validation` without an HTTP call.
+    /// The server limits folder purges per hour; past the limit it answers 429
+    /// `purge_rate_limited` (`SmallPictError::RateLimit`), which is not retried.
+    pub fn purge_folder(&self, folder: &str) -> Result<PurgeResponse, SmallPictError> {
+        check_folder(folder)?;
+        let payload = serde_json::json!({
+            "purge_type": "folder",
+            "folder": folder,
         });
 
         let val = self.request(reqwest::Method::POST, "/v1/purge", Some(payload), None)?;
@@ -335,7 +358,10 @@ impl BlockingClient {
                 .and_then(|v| v.to_str().ok())
                 .and_then(|s| s.parse::<u64>().ok());
 
-            if (status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            let resp_bytes = resp.bytes().map_err(SmallPictError::from)?;
+
+            if ((status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                && !is_purge_rate_limited(&resp_bytes))
                 || (status.is_server_error() && status.as_u16() <= 504))
                 && attempt <= self.max_retries
             {
@@ -348,7 +374,6 @@ impl BlockingClient {
                 continue;
             }
 
-            let resp_bytes = resp.bytes().map_err(SmallPictError::from)?;
             let parsed_json: Result<Value, _> = serde_json::from_slice(&resp_bytes);
 
             if !status.is_success() {

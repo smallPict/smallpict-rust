@@ -125,6 +125,10 @@ pub struct OptimizeOptions {
     pub mime_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_type: Option<String>,
+    /// Upload folder (1-3 segments), sent as `options.folder`. The server lower-cases it
+    /// and answers 400 `invalid_folder` for a malformed value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
     #[serde(skip)]
     pub idempotency_key: Option<String>,
 }
@@ -145,6 +149,7 @@ impl Default for OptimizeOptions {
             filename: None,
             mime_type: None,
             content_type: None,
+            folder: None,
             idempotency_key: None,
         }
     }
@@ -170,6 +175,28 @@ impl OptimizeOptions {
             (None, true) => Ok(Some(CompressionMode::Lossless)),
             (m, _) => Ok(m),
         }
+    }
+}
+
+/// Light client-side check of an upload folder: no empty segment (`a//b`, leading or
+/// trailing `/`), no `..` segment, at most 3 segments. The server owns the full rule.
+pub(crate) fn check_folder(folder: &str) -> Result<(), SmallPictError> {
+    let segments: Vec<&str> = folder.split('/').collect();
+    let problem = if segments.iter().any(|s| s.is_empty()) {
+        Some("must not contain empty segments (leading, trailing or double '/')")
+    } else if segments.contains(&"..") {
+        Some("must not contain '..' segments")
+    } else if segments.len() > 3 {
+        Some("must have at most 3 segments")
+    } else {
+        None
+    };
+    match problem {
+        Some(p) => Err(SmallPictError::Validation {
+            message: format!("invalid folder {:?}: {}", folder, p),
+            details: None,
+        }),
+        None => Ok(()),
     }
 }
 
@@ -242,6 +269,11 @@ impl OptimizeOptionsBuilder {
         self
     }
 
+    pub fn folder(mut self, folder: impl Into<String>) -> Self {
+        self.options.folder = Some(folder.into());
+        self
+    }
+
     pub fn idempotency_key(mut self, key: impl Into<String>) -> Self {
         self.options.idempotency_key = Some(key.into());
         self
@@ -265,6 +297,10 @@ pub struct OptimizeResult {
     pub savings_percentage: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upload_url: Option<String>,
+    /// Upload folder stored with the job, as the server returns it (lower case); `None`
+    /// without a folder, for a passthrough fallback, and from servers that do not send it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
     #[serde(skip)]
     pub data: Option<Vec<u8>>,
 }
@@ -316,4 +352,7 @@ pub struct JobStatusResult {
     /// Quality the server applied. Absent for older jobs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quality_applied: Option<u32>,
+    /// Folder stored with the job, normalized by the server (lower case). Absent without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
 }
