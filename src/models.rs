@@ -102,6 +102,8 @@ impl fmt::Display for PurgeType {
 pub struct OptimizeOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<ImageFormat>,
+    /// Quality 1-100. `None` (the default) is not sent, so the server picks the default
+    /// for the mode and output format; a value you set is kept or raised to the mode's floor.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quality: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -138,7 +140,7 @@ impl Default for OptimizeOptions {
     fn default() -> Self {
         Self {
             format: Some(ImageFormat::Auto),
-            quality: Some(80),
+            quality: None,
             max_width: None,
             max_height: None,
             max_dimension: None,

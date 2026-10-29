@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### 3. Compression Mode
 
-`mode` picks the compression: `Lossy` (server default), `Extreme` or `Lossless`. The server checks it against your plan and answers HTTP 403 `mode_not_in_plan` (`SmallPictError::Forbidden`, with `details.allowed_modes`) when the plan does not include it. The old `lossless(true)` option is deprecated; use `.mode(CompressionMode::Lossless)`.
+`mode` picks the compression: `Lossy` (server default), `Extreme` or `Lossless`. The server checks it against your plan and answers HTTP 403 `mode_not_in_plan` (`SmallPictError::Forbidden`, with `details.allowed_modes`) when the plan does not include it. `Extreme` gives the smallest files on every plan; leave `quality` out so the server uses its default for the output format, and a quality you set is kept or raised to the format floor. Mode comparison: https://smallpict.app/en/docs/image-settings . The old `lossless(true)` option is deprecated; use `.mode(CompressionMode::Lossless)`.
 
 ```rust
 use smallpict::{CompressionMode, OptimizeOptions, SmallPictError};
@@ -105,6 +105,12 @@ match client.optimize(&image_bytes, Some(options)).await {
     }
     Err(e) => return Err(e.into()),
 }
+
+// Extreme without a quality: the server uses its default for the output format.
+let options = OptimizeOptions::builder()
+    .mode(CompressionMode::Extreme)
+    .build();
+let result = client.optimize(&image_bytes, Some(options)).await?;
 
 // The job status reports what the server applied (absent for older jobs).
 let status = client.get_job_status("job_id").await?;

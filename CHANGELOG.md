@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP 429 with error code `purge_rate_limited` (hourly limit of folder and `all` purges) is no longer retried automatically; it returns `SmallPictError::RateLimit` after one request. Other 429 responses are retried as before.
 
 ### Fixed
+- `OptimizeOptions::quality` now defaults to `None` and is sent only when set (CMP-04). The SDK used to send `quality: 80` on every request, so `mode: extreme` produced lossy-Q80-sized files; the server now applies its default per mode (lossy 80, extreme a per-codec default, lossless ignores quality). Lossy results are unchanged. Code that read `OptimizeOptions::default().quality` as `Some(80)` now gets `None`.
+- README: compression mode section shows `CompressionMode::Extreme` without a quality.
 - `lossless(true)` used to be ignored by the server; it is now honoured (sent as `mode: "lossless"`).
 
 ### Compatibility

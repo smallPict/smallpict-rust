@@ -91,6 +91,31 @@ async fn mapping_cases_from_shared_fixture() {
 }
 
 #[tokio::test]
+async fn quality_omitted_when_unset_so_server_picks_default() {
+    for opts in [None, Some(OptimizeOptions::default())] {
+        let (url, rx) = mock_server(200, OK);
+        client(&url).optimize(b"img", opts).await.unwrap();
+        let sent = rx.recv().unwrap();
+        assert!(
+            sent["options"].get("quality").is_none(),
+            "quality sent: {sent}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn quality_sent_when_set() {
+    let (url, rx) = mock_server(200, OK);
+    let opts = OptimizeOptions::builder()
+        .mode(CompressionMode::Extreme)
+        .quality(70)
+        .build();
+    client(&url).optimize(b"img", Some(opts)).await.unwrap();
+    let sent = rx.recv().unwrap();
+    assert_eq!(sent["options"]["quality"], 70);
+}
+
+#[tokio::test]
 async fn flag_contradicts_mode_is_validation_error_without_request() {
     let (url, rx) = mock_server(200, OK);
     let opts = OptimizeOptions::builder()
