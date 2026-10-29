@@ -1,3 +1,4 @@
+use crate::errors::SmallPictError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -56,6 +57,28 @@ pub enum FallbackMode {
     Passthrough,
 }
 
+/// Compression mode of `POST /v1/optimize` (`options.mode`). The server applies
+/// `Lossy` when no mode is sent and rejects a mode the plan does not include
+/// with HTTP 403 `mode_not_in_plan`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CompressionMode {
+    #[default]
+    Lossy,
+    Extreme,
+    Lossless,
+}
+
+impl fmt::Display for CompressionMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Lossy => write!(f, "lossy"),
+            Self::Extreme => write!(f, "extreme"),
+            Self::Lossless => write!(f, "lossless"),
+        }
+    }
+}
+
 /// CDN cache invalidation scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -90,6 +113,10 @@ pub struct OptimizeOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fit: Option<FitMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<CompressionMode>,
+    /// Deprecated: `Some(true)` is sent as `mode: "lossless"`; never sent on the wire.
+    #[deprecated(note = "use mode")]
+    #[serde(skip_serializing)]
     pub lossless: Option<bool>,
     pub strip_metadata: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,6 +129,7 @@ pub struct OptimizeOptions {
     pub idempotency_key: Option<String>,
 }
 
+#[allow(deprecated)]
 impl Default for OptimizeOptions {
     fn default() -> Self {
         Self {
@@ -111,6 +139,7 @@ impl Default for OptimizeOptions {
             max_height: None,
             max_dimension: None,
             fit: Some(FitMode::Cover),
+            mode: None,
             lossless: Some(false),
             strip_metadata: true,
             filename: None,
@@ -124,6 +153,23 @@ impl Default for OptimizeOptions {
 impl OptimizeOptions {
     pub fn builder() -> OptimizeOptionsBuilder {
         OptimizeOptionsBuilder::default()
+    }
+
+    /// Mode to send on the wire: `mode` if set, else `Lossless` when the deprecated
+    /// `lossless` flag is true. A flag that contradicts an explicit mode is an error.
+    #[allow(deprecated)]
+    pub(crate) fn wire_mode(&self) -> Result<Option<CompressionMode>, SmallPictError> {
+        match (self.mode, self.lossless == Some(true)) {
+            (Some(m), true) if m != CompressionMode::Lossless => Err(SmallPictError::Validation {
+                message: format!(
+                    "lossless = true contradicts mode = \"{}\"; set only mode",
+                    m
+                ),
+                details: None,
+            }),
+            (None, true) => Ok(Some(CompressionMode::Lossless)),
+            (m, _) => Ok(m),
+        }
     }
 }
 
@@ -164,6 +210,13 @@ impl OptimizeOptionsBuilder {
         self
     }
 
+    pub fn mode(mut self, mode: CompressionMode) -> Self {
+        self.options.mode = Some(mode);
+        self
+    }
+
+    #[deprecated(note = "use mode")]
+    #[allow(deprecated)]
     pub fn lossless(mut self, lossless: bool) -> Self {
         self.options.lossless = Some(lossless);
         self
@@ -256,4 +309,11 @@ pub struct JobStatusResult {
     pub created_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+    /// Mode the server applied; a string so new server values never break parsing.
+    /// Absent for jobs created before compression modes existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode_applied: Option<String>,
+    /// Quality the server applied. Absent for older jobs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality_applied: Option<u32>,
 }

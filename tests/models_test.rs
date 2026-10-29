@@ -1,4 +1,6 @@
-use smallpict::models::{FitMode, ImageFormat, OptimizeOptions, PurgeResponse, QuotaResponse};
+use smallpict::models::{
+    CompressionMode, FitMode, ImageFormat, OptimizeOptions, PurgeResponse, QuotaResponse,
+};
 
 #[test]
 fn test_optimize_options_builder() {
@@ -9,7 +11,7 @@ fn test_optimize_options_builder() {
         .max_height(1080)
         .max_dimension(1600)
         .fit(FitMode::Contain)
-        .lossless(false)
+        .mode(CompressionMode::Extreme)
         .strip_metadata(true)
         .filename("banner.png")
         .mime_type("image/png")
@@ -29,6 +31,8 @@ fn test_optimize_options_builder() {
     assert!(json_str.contains("\"format\":\"avif\""));
     assert!(json_str.contains("\"quality\":85"));
     assert!(json_str.contains("\"max_dimension\":1600"));
+    assert!(json_str.contains("\"mode\":\"extreme\""));
+    assert!(!json_str.contains("lossless")); // deprecated flag never serialized
     assert!(!json_str.contains("idempotency_key")); // skipped from JSON body
 }
 

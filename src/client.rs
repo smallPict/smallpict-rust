@@ -42,7 +42,8 @@ impl Client {
         data: &[u8],
         options: Option<OptimizeOptions>,
     ) -> Result<OptimizeResult, SmallPictError> {
-        let opts = options.unwrap_or_default();
+        let mut opts = options.unwrap_or_default();
+        opts.mode = opts.wire_mode()?;
         let filename = opts.filename.clone().unwrap_or_else(|| "image.jpg".into());
         let mime_type = opts
             .mime_type
@@ -386,6 +387,7 @@ impl Client {
                     }),
                     403 => Err(SmallPictError::Forbidden {
                         message,
+                        details,
                         request_id: req_id,
                     }),
                     404 => Err(SmallPictError::NotFound {

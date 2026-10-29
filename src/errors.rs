@@ -76,6 +76,8 @@ pub enum SmallPictError {
     #[error("[FORBIDDEN] HTTP 403: {}", sanitize_message(.message))]
     Forbidden {
         message: String,
+        /// Error details from the server, e.g. `mode` and `allowed_modes` for `mode_not_in_plan`.
+        details: Option<serde_json::Value>,
         request_id: Option<String>,
     },
 

@@ -1,0 +1,166 @@
+//! FND-07 compression mode: mapping cases from smallpict-sdk-shared/compression-modes.json,
+//! job status fields, and 403 mode_not_in_plan details.
+#![allow(deprecated)] // exercises the deprecated `lossless` flag on purpose
+
+use serde_json::Value;
+use smallpict::{Client, CompressionMode, OptimizeOptions};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
+use std::sync::mpsc;
+
+/// Serves one HTTP request with `status` and `body`; sends the request body (JSON) back.
+fn mock_server(status: u16, body: &'static str) -> (String, mpsc::Receiver<Value>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut len = 0;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+            if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                len = v.trim().parse().unwrap();
+            }
+        }
+        let mut buf = vec![0; len];
+        reader.read_exact(&mut buf).unwrap();
+        let _ = tx.send(serde_json::from_slice(&buf).unwrap_or(Value::Null));
+        let mut stream = stream;
+        write!(
+            stream,
+            "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+    });
+    (url, rx)
+}
+
+fn client(url: &str) -> Client {
+    Client::builder()
+        .api_key("sp_sdk_test_1234567890")
+        .base_url(url)
+        .max_retries(0)
+        .build()
+        .unwrap()
+}
+
+const OK: &str = r#"{"job_id":"j1","status":"completed","url":"https://cdn/x"}"#;
+
+/// (name, mode, lossless, expected wire mode or None when omitted)
+type Case = (
+    &'static str,
+    Option<CompressionMode>,
+    Option<bool>,
+    Option<&'static str>,
+);
+
+#[tokio::test]
+async fn mapping_cases_from_shared_fixture() {
+    use CompressionMode::*;
+    let cases: [Case; 5] = [
+        ("no mode, no flag", None, None, None),
+        ("mode only", Some(Extreme), None, Some("extreme")),
+        ("deprecated flag only", None, Some(true), Some("lossless")),
+        ("flag false is ignored", None, Some(false), None),
+        (
+            "flag agrees with mode",
+            Some(Lossless),
+            Some(true),
+            Some("lossless"),
+        ),
+    ];
+    for (name, mode, lossless, wire) in cases {
+        let (url, rx) = mock_server(200, OK);
+        let opts = OptimizeOptions {
+            mode,
+            lossless,
+            ..Default::default()
+        };
+        client(&url).optimize(b"img", Some(opts)).await.unwrap();
+        let sent = rx.recv().unwrap();
+        let options = &sent["options"];
+        assert_eq!(options.get("mode").and_then(Value::as_str), wire, "{name}");
+        assert!(options.get("lossless").is_none(), "{name}: lossless sent");
+    }
+}
+
+#[tokio::test]
+async fn flag_contradicts_mode_is_validation_error_without_request() {
+    let (url, rx) = mock_server(200, OK);
+    let opts = OptimizeOptions::builder()
+        .mode(CompressionMode::Lossy)
+        .lossless(true)
+        .build();
+    let err = client(&url).optimize(b"img", Some(opts)).await.unwrap_err();
+    assert!(err.is_validation_error(), "{err}");
+    assert!(rx.try_recv().is_err(), "no HTTP request expected");
+}
+
+#[tokio::test]
+async fn mode_not_in_plan_keeps_details() {
+    let (url, _rx) = mock_server(
+        403,
+        r#"{"error":{"code":"mode_not_in_plan","message":"Mode extreme is not in your plan","details":{"mode":"extreme","allowed_modes":["lossy"]}}}"#,
+    );
+    let opts = OptimizeOptions::builder()
+        .mode(CompressionMode::Extreme)
+        .build();
+    let err = client(&url).optimize(b"img", Some(opts)).await.unwrap_err();
+    assert!(err.is_forbidden());
+    match err {
+        smallpict::SmallPictError::Forbidden {
+            message, details, ..
+        } => {
+            assert_eq!(message, "Mode extreme is not in your plan");
+            let d = details.expect("details");
+            assert_eq!(d["mode"], "extreme");
+            assert_eq!(d["allowed_modes"], serde_json::json!(["lossy"]));
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn job_status_parses_mode_and_quality_applied() {
+    let (url, _rx) = mock_server(
+        200,
+        r#"{"job_id":"j1","status":"completed","mode_applied":"extreme","quality_applied":62}"#,
+    );
+    let st = client(&url).get_job_status("j1").await.unwrap();
+    assert_eq!(st.mode_applied.as_deref(), Some("extreme"));
+    assert_eq!(st.quality_applied, Some(62));
+
+    // Old jobs omit both fields; unknown future modes still parse.
+    let (url, _rx) = mock_server(200, r#"{"job_id":"j0","status":"completed"}"#);
+    let st = client(&url).get_job_status("j0").await.unwrap();
+    assert_eq!((st.mode_applied, st.quality_applied), (None, None));
+    let (url, _rx) = mock_server(
+        200,
+        r#"{"job_id":"j2","status":"completed","mode_applied":"ultra"}"#,
+    );
+    let st = client(&url).get_job_status("j2").await.unwrap();
+    assert_eq!(st.mode_applied.as_deref(), Some("ultra"));
+}
+
+#[cfg(feature = "blocking")]
+#[test]
+fn blocking_client_maps_deprecated_flag() {
+    let (url, rx) = mock_server(200, OK);
+    let c = smallpict::BlockingClient::builder()
+        .api_key("sp_sdk_test_1234567890")
+        .base_url(url)
+        .max_retries(0)
+        .build()
+        .unwrap();
+    let opts = OptimizeOptions::builder().lossless(true).build();
+    c.optimize(b"img", Some(opts)).unwrap();
+    let sent = rx.recv().unwrap();
+    assert_eq!(sent["options"]["mode"], "lossless");
+    assert!(sent["options"].get("lossless").is_none());
+}

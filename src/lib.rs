@@ -61,8 +61,8 @@ pub mod blocking;
 // Re-exports for convenient top-level usage
 pub use errors::{sanitize_message, SecretRedacted, SmallPictError};
 pub use models::{
-    FallbackMode, FitMode, ImageFormat, JobStatusResult, OptimizeOptions, OptimizeOptionsBuilder,
-    OptimizeResult, PurgeResponse, PurgeType, QuotaResponse,
+    CompressionMode, FallbackMode, FitMode, ImageFormat, JobStatusResult, OptimizeOptions,
+    OptimizeOptionsBuilder, OptimizeResult, PurgeResponse, PurgeType, QuotaResponse,
 };
 
 #[cfg(feature = "async")]

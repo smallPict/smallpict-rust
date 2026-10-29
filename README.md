@@ -87,6 +87,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### 3. Compression Mode
+
+`mode` picks the compression: `Lossy` (server default), `Extreme` or `Lossless`. The server checks it against your plan and answers HTTP 403 `mode_not_in_plan` (`SmallPictError::Forbidden`, with `details.allowed_modes`) when the plan does not include it. The old `lossless(true)` option is deprecated; use `.mode(CompressionMode::Lossless)`.
+
+```rust
+use smallpict::{CompressionMode, OptimizeOptions, SmallPictError};
+
+let options = OptimizeOptions::builder()
+    .mode(CompressionMode::Lossless)
+    .build();
+
+match client.optimize(&image_bytes, Some(options)).await {
+    Ok(result) => println!("CDN URL: {}", result.url),
+    Err(SmallPictError::Forbidden { details, .. }) => {
+        println!("Allowed modes: {:?}", details.and_then(|d| d.get("allowed_modes").cloned()));
+    }
+    Err(e) => return Err(e.into()),
+}
+
+// The job status reports what the server applied (absent for older jobs).
+let status = client.get_job_status("job_id").await?;
+println!("{:?} at quality {:?}", status.mode_applied, status.quality_applied);
+```
+
 ---
 
 ## 📊 Account Quota & Edge CDN Purge
