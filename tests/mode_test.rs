@@ -63,9 +63,10 @@ type Case = (
 #[tokio::test]
 async fn mapping_cases_from_shared_fixture() {
     use CompressionMode::*;
-    let cases: [Case; 5] = [
+    let cases: [Case; 6] = [
         ("no mode, no flag", None, None, None),
         ("mode only", Some(Extreme), None, Some("extreme")),
+        ("mode auto", Some(Auto), None, Some("auto")),
         ("deprecated flag only", None, Some(true), Some("lossless")),
         ("flag false is ignored", None, Some(false), None),
         (

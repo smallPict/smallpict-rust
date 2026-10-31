@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### 3. Compression Mode
 
-`mode` picks the compression: `Lossy` (server default), `Extreme` or `Lossless`. The server checks it against your plan and answers HTTP 403 `mode_not_in_plan` (`SmallPictError::Forbidden`, with `details.allowed_modes`) when the plan does not include it. `Extreme` gives the smallest files on every plan; leave `quality` out so the server uses its default for the output format, and a quality you set is kept or raised to the format floor. Mode comparison: https://smallpict.app/en/docs/image-settings . The old `lossless(true)` option is deprecated; use `.mode(CompressionMode::Lossless)`.
+`mode` picks the compression: `Lossy` (server default), `Extreme`, `Lossless` or `Auto`. `Auto` picks, per image, the lowest quality that keeps the visual score (SSIMULACRA 2) at or above 70, and ignores `quality`; it is on WP Pro and Business, Velocity, Momentum and sandbox keys (5 auto jobs per minute per sandbox key), and where it cannot search (PNG or GIF output, animation, time limit) the job is lossy and `mode_applied` says so. The server checks it against your plan and answers HTTP 403 `mode_not_in_plan` (`SmallPictError::Forbidden`, with `details.allowed_modes`) when the plan does not include it. `Extreme` gives the smallest files on every plan; leave `quality` out so the server uses its default for the output format, and a quality you set is kept or raised to the format floor. Mode comparison: https://smallpict.app/en/docs/image-settings . The old `lossless(true)` option is deprecated; use `.mode(CompressionMode::Lossless)`.
 
 ```rust
 use smallpict::{CompressionMode, OptimizeOptions, SmallPictError};

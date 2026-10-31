@@ -67,6 +67,8 @@ pub enum CompressionMode {
     Lossy,
     Extreme,
     Lossless,
+    /// The server picks the quality per image from a visual score (CMP-07).
+    Auto,
 }
 
 impl fmt::Display for CompressionMode {
@@ -75,6 +77,7 @@ impl fmt::Display for CompressionMode {
             Self::Lossy => write!(f, "lossy"),
             Self::Extreme => write!(f, "extreme"),
             Self::Lossless => write!(f, "lossless"),
+            Self::Auto => write!(f, "auto"),
         }
     }
 }

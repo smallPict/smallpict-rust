@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `CompressionMode::Auto` (`"auto"`): the server picks the quality per image from a visual score (CMP-07). Plans: WP Pro and Business, Velocity, Momentum and sandbox; a server without auto enabled answers `400 invalid_mode`. A new variant of a public enum: an exhaustive `match` on `CompressionMode` needs an `Auto` arm (source-breaking).
 - `CompressionMode` enum (`Lossy`, `Extreme`, `Lossless`; serialized lowercase) and `OptimizeOptions::mode` / `OptimizeOptionsBuilder::mode()`, sent as `options.mode` on `POST /v1/optimize` (FND-07). Omitted when unset, so the server default (`lossy`) applies.
 - `JobStatusResult::mode_applied` (`Option<String>`, so new server values never break parsing) and `JobStatusResult::quality_applied` (`Option<u32>`), filled only from the server response and absent for older jobs.
 - `OptimizeOptions::folder` (`Option<String>`) and `OptimizeOptionsBuilder::folder()`, sent as `options.folder` on `POST /v1/optimize` (FLD-03). Omitted when unset. A folder with an empty segment (`a//b`, leading or trailing `/`), a `..` segment or more than 3 segments returns `SmallPictError::Validation` without an HTTP call; the server's 400 `invalid_folder` maps to `SmallPictError::Validation` with the server's message.
