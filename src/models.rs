@@ -322,6 +322,71 @@ pub struct QuotaResponse {
     pub active_keys_count: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_sites_count: Option<u32>,
+    /// Read-only capacity of the key's product. `None` when the server could not read it
+    /// (`null`) and on older servers that do not send it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capacity: Option<Capacity>,
+}
+
+/// Read-only capacity from `GET /v1/quota`. A member that does not apply is `None`.
+/// Capacity is bought only in the dashboard; the SDK never opens or fetches `manage_url`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Capacity {
+    /// End of the current paid period (RFC 3339).
+    pub period_end: Option<String>,
+    pub storage: Option<CapacityStorage>,
+    pub cdn: Option<CapacityCdn>,
+    pub booster: CapacityBooster,
+    pub lapse: Option<CapacityLapse>,
+    /// Dashboard page where capacity is managed; shown to the user, never opened by the SDK.
+    pub manage_url: String,
+}
+
+/// smallPict-managed storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapacityStorage {
+    pub limit_bytes: i64,
+    pub used_bytes: i64,
+    pub base_bytes: i64,
+    pub addon_blocks: i64,
+}
+
+/// Managed CDN usage of the current cycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapacityCdn {
+    pub limit_bytes: i64,
+    pub used_bytes: i64,
+    /// `ok`, `warn_80`, `exceeded_grace` or `hard_block`; a string so new values still parse.
+    pub status: String,
+}
+
+/// One-time booster balances left.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapacityBooster {
+    pub active: bool,
+    pub wp_quota_bytes: Option<i64>,
+    pub api_transforms: Option<i64>,
+    pub cdn_bytes: Option<i64>,
+    pub next_expiry: Option<BoosterExpiry>,
+}
+
+/// The booster lot that expires first.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoosterExpiry {
+    /// `wp_quota_bytes`, `api_transforms` or `cdn_bytes`.
+    pub kind: String,
+    pub units: i64,
+    /// RFC 3339.
+    pub expires_at: String,
+}
+
+/// Unpaid-account state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapacityLapse {
+    /// `grace`, `blocked` or `deleting`.
+    pub stage: String,
+    /// When managed files are deleted (RFC 3339); `None` in `grace`.
+    pub delete_after: Option<String>,
 }
 
 /// CDN cache purge response.

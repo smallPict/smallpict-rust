@@ -61,6 +61,7 @@ pub mod blocking;
 // Re-exports for convenient top-level usage
 pub use errors::{sanitize_message, SecretRedacted, SmallPictError};
 pub use models::{
+    BoosterExpiry, Capacity, CapacityBooster, CapacityCdn, CapacityLapse, CapacityStorage,
     CompressionMode, FallbackMode, FitMode, ImageFormat, JobStatusResult, OptimizeOptions,
     OptimizeOptionsBuilder, OptimizeResult, PurgeResponse, PurgeType, QuotaResponse,
 };

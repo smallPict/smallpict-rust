@@ -388,11 +388,15 @@ impl Client {
             if !status.is_success() {
                 let mut message = format!("API request failed with HTTP {}", status.as_u16());
                 let mut details = None;
+                let mut code = None;
 
                 if let Ok(ref val) = parsed_json {
                     if let Some(err_obj) = val.get("error") {
                         if let Some(m) = err_obj.get("message").and_then(|v| v.as_str()) {
                             message = m.to_string();
+                        }
+                        if let Some(c) = err_obj.get("code").and_then(|v| v.as_str()) {
+                            code = Some(c.to_string());
                         }
                         if let Some(d) = err_obj.get("details") {
                             details = Some(d.clone());
@@ -410,6 +414,7 @@ impl Client {
                     }),
                     402 => Err(SmallPictError::QuotaExceeded {
                         message,
+                        details,
                         request_id: req_id,
                     }),
                     403 => Err(SmallPictError::Forbidden {
@@ -429,6 +434,8 @@ impl Client {
                     _ => Err(SmallPictError::Server {
                         status: status.as_u16(),
                         message,
+                        code,
+                        details,
                         request_id: req_id,
                     }),
                 };

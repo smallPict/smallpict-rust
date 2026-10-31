@@ -70,6 +70,8 @@ pub enum SmallPictError {
     #[error("[QUOTA_EXCEEDED] HTTP 402: {}", sanitize_message(.message))]
     QuotaExceeded {
         message: String,
+        /// Error details from the server, e.g. `upgrade_url`, or `limit_bytes` for `storage_quota_exceeded`.
+        details: Option<serde_json::Value>,
         request_id: Option<String>,
     },
 
@@ -98,6 +100,10 @@ pub enum SmallPictError {
     Server {
         status: u16,
         message: String,
+        /// Server error code, e.g. `booster_period_limit_exceeded` for a 409.
+        code: Option<String>,
+        /// Error details from the server, e.g. `upgrade_url`.
+        details: Option<serde_json::Value>,
         request_id: Option<String>,
     },
 
@@ -150,6 +156,47 @@ impl SmallPictError {
 
     pub fn is_server_error(&self) -> bool {
         matches!(self, Self::Server { .. })
+    }
+
+    /// Error details from the server (`error.details`), when the variant carries them.
+    pub fn details(&self) -> Option<&serde_json::Value> {
+        match self {
+            Self::Validation { details, .. }
+            | Self::QuotaExceeded { details, .. }
+            | Self::Forbidden { details, .. }
+            | Self::Server { details, .. } => details.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Dashboard page where the missing capacity is added (`details.upgrade_url`), or `None`
+    /// when absent or not a string. Shown to the user; the SDK never opens or fetches it.
+    pub fn upgrade_url(&self) -> Option<&str> {
+        self.details()?.get("upgrade_url")?.as_str()
+    }
+
+    /// Modes the plan allows (`details.allowed_modes` of a 403 `mode_not_in_plan`), or `None`.
+    pub fn allowed_modes(&self) -> Option<Vec<&str>> {
+        match self {
+            Self::Forbidden {
+                details: Some(d), ..
+            } => Some(
+                d.get("allowed_modes")?
+                    .as_array()?
+                    .iter()
+                    .filter_map(|m| m.as_str())
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+
+    /// Server error code of an error mapped to `Server` (for example a 409), or `None`.
+    pub fn code(&self) -> Option<&str> {
+        match self {
+            Self::Server { code, .. } => code.as_deref(),
+            _ => None,
+        }
     }
 }
 

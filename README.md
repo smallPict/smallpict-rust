@@ -149,6 +149,30 @@ client.purge_folder("products/shoes").await?;
 
 Folder purges (10 per hour) and `PurgeType::All` purges (2 per hour) are limited per account. Past the limit the server answers HTTP 429 `purge_rate_limited` (`SmallPictError::RateLimit`), which the SDK does not retry automatically.
 
+### Capacity and upgrade links
+
+`get_quota()` returns `capacity` (read-only): storage, CDN, booster balances with the lot that expires first, the unpaid-account state, `period_end` and `manage_url` of the key's product. Members that do not apply are `None`; `capacity` is `None` when the server could not read it and on older servers. Capacity is bought only in the dashboard.
+
+```rust
+if let Some(cap) = client.get_quota().await?.capacity {
+    if let Some(cdn) = cap.cdn {
+        println!("CDN {}/{} bytes ({})", cdn.used_bytes, cdn.limit_bytes, cdn.status);
+    }
+    println!("Manage capacity: {}", cap.manage_url);
+}
+
+match client.optimize(&image_bytes, None).await {
+    Ok(result) => println!("{}", result.url),
+    Err(e) if e.is_forbidden() => println!("Allowed modes: {:?}", e.allowed_modes()),
+    Err(e) => match e.upgrade_url() {
+        Some(url) => println!("{e}. Add capacity: {url}"),
+        None => println!("{e}"),
+    },
+}
+```
+
+`upgrade_url()` reads `details.upgrade_url` of 402 errors and of the 409 capacity codes (`SmallPictError::Server` with status 409; `e.code()` gives the code). The SDK never opens, fetches or builds `manage_url` or `upgrade_url`; show them to the user.
+
 ---
 
 ## 🧪 Testing
