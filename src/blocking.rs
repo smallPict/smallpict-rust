@@ -1,18 +1,21 @@
 use crate::crypto::{self, EMPTY_SHA256};
-use crate::errors::{is_purge_rate_limited, SecretRedacted, SmallPictError};
+use crate::errors::{
+    is_purge_rate_limited, job_failed, job_timeout, reject_url_source, upload_failed,
+    SecretRedacted, SmallPictError,
+};
 use crate::models::{
-    check_folder, FallbackMode, JobStatusResult, OptimizeOptions, OptimizeResult, PurgeResponse,
-    PurgeType, QuotaResponse,
+    check_folder, passthrough, FallbackMode, JobStatusResult, OptimizeOptions, OptimizeResult,
+    PurgeResponse, PurgeType, QueuedJob, QuotaResponse,
 };
 use bytes::Bytes;
 use rand::Rng;
 use reqwest::blocking::Client as ReqwestBlockingClient;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
 use serde_json::Value;
 use std::env;
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 /// Synchronous (blocking) client for interacting with the SmallPict API.
@@ -24,6 +27,8 @@ pub struct BlockingClient {
     pub(crate) timeout: Duration,
     pub(crate) max_retries: u32,
     pub(crate) fallback_mode: FallbackMode,
+    pub(crate) poll_interval: Duration,
+    pub(crate) wait_timeout: Duration,
     pub(crate) http_client: ReqwestBlockingClient,
 }
 
@@ -39,6 +44,14 @@ impl BlockingClient {
     }
 
     /// Optimizes raw in-memory image bytes synchronously.
+    ///
+    /// Queues the job, PUTs the bytes to the pre-signed `upload_url` the API returns, and
+    /// polls the job status every `poll_interval` until it is completed. Returns the finished
+    /// job (`url`, `format`, `bytes_saved`, `mode_applied`, `quality_applied`, `folder`).
+    ///
+    /// Errors: `SmallPictError::Optimize` with code `job_failed` (the server's message,
+    /// `details.job_id`) or `upload_failed` (the storage refused the PUT), and
+    /// `SmallPictError::Timeout` naming the job when it is still running after `wait_timeout`.
     pub fn optimize(
         &self,
         data: &[u8],
@@ -64,101 +77,71 @@ impl BlockingClient {
             "options": serde_json::to_value(&opts).map_err(SmallPictError::from)?,
         });
 
-        match self.request(
+        let queued = match self.request(
             reqwest::Method::POST,
             "/v1/optimize",
             Some(payload),
             opts.idempotency_key.as_deref(),
         ) {
-            Ok(val) => {
-                let orig_size = val
-                    .get("original_size")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(data.len() as u64);
-                let comp_size = val
-                    .get("compressed_size")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(orig_size);
-                let saved = val
-                    .get("bytes_saved")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or_else(|| orig_size.saturating_sub(comp_size));
-                let savings_pct = val
-                    .get("savings_percentage")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or_else(|| {
-                        if orig_size > 0 {
-                            ((saved as f64 / orig_size as f64) * 100.0 * 100.0).round() / 100.0
-                        } else {
-                            0.0
-                        }
-                    });
-
-                Ok(OptimizeResult {
-                    job_id: val
-                        .get("job_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("sync")
-                        .to_string(),
-                    status: val
-                        .get("status")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("completed")
-                        .to_string(),
-                    url: val
-                        .get("url")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    format: val
-                        .get("format")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("auto")
-                        .to_string(),
-                    original_size: orig_size,
-                    compressed_size: comp_size,
-                    bytes_saved: saved,
-                    savings_percentage: savings_pct,
-                    upload_url: val
-                        .get("upload_url")
-                        .and_then(|v| v.as_str())
-                        .map(ToString::to_string),
-                    folder: val
-                        .get("folder")
-                        .and_then(|v| v.as_str())
-                        .map(ToString::to_string),
-                    data: None,
-                })
-            }
+            Ok(val) => serde_json::from_value::<QueuedJob>(val)?,
             Err(e) => {
                 if e.is_quota_exceeded() && self.fallback_mode == FallbackMode::Passthrough {
-                    let format_str = mime_type.trim_start_matches("image/").to_string();
-                    return Ok(OptimizeResult {
-                        job_id: "fallback-passthrough".to_string(),
-                        status: "completed".to_string(),
-                        url: String::new(),
-                        format: format_str,
-                        original_size: data.len() as u64,
-                        compressed_size: data.len() as u64,
-                        bytes_saved: 0,
-                        savings_percentage: 0.0,
-                        upload_url: None,
-                        folder: None,
-                        data: Some(data.to_vec()),
-                    });
+                    return Ok(passthrough(data, &mime_type));
                 }
-                Err(e)
+                return Err(e);
+            }
+        };
+
+        // The worker waits 30 s from the request for the object: upload now, poll after.
+        self.upload(&queued.upload_url, data, &mime_type)?;
+
+        let deadline = Instant::now() + self.wait_timeout;
+        loop {
+            std::thread::sleep(
+                self.poll_interval
+                    .min(deadline.saturating_duration_since(Instant::now())),
+            );
+            let st = self.get_job_status(&queued.job_id)?;
+            match st.status.as_str() {
+                "completed" => return Ok(OptimizeResult::from_status(st, data.len() as u64)),
+                "failed" => return Err(job_failed(&st.job_id, st.error.as_ref())),
+                _ if Instant::now() >= deadline => {
+                    return Err(job_timeout(&queued.job_id, self.wait_timeout))
+                }
+                _ => {}
             }
         }
     }
 
-    /// Reads an image file from local disk and performs synchronous optimization.
+    /// PUTs the bytes to the pre-signed `upload_url` with only `Content-Type` and
+    /// `Content-Length`: S3 refuses other signed headers. No retry: the worker stops
+    /// waiting for the object 30 s after the job was queued.
+    fn upload(&self, url: &str, data: &[u8], mime_type: &str) -> Result<(), SmallPictError> {
+        let resp = self
+            .http_client
+            .put(url)
+            .header(CONTENT_TYPE, mime_type)
+            .header(CONTENT_LENGTH, data.len())
+            .body(data.to_vec())
+            .timeout(self.timeout)
+            .send()?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().unwrap_or_default();
+            return Err(upload_failed(status.as_u16(), &body));
+        }
+        Ok(())
+    }
+
+    /// Reads an image file from local disk and performs synchronous optimization. An
+    /// `http(s)://` path returns `SmallPictError::Validation`: the API does not fetch URLs.
     pub fn optimize_file(
         &self,
         path: impl AsRef<Path>,
         options: Option<OptimizeOptions>,
     ) -> Result<OptimizeResult, SmallPictError> {
         let path = path.as_ref();
+        reject_url_source(path)?;
         let bytes = fs::read(path)?;
 
         let mut opts = options.unwrap_or_default();
@@ -450,6 +433,8 @@ pub struct BlockingClientBuilder {
     timeout: Duration,
     max_retries: u32,
     fallback_mode: FallbackMode,
+    poll_interval: Duration,
+    wait_timeout: Duration,
 }
 
 impl Default for BlockingClientBuilder {
@@ -467,6 +452,8 @@ impl BlockingClientBuilder {
             timeout: Duration::from_secs(30),
             max_retries: 3,
             fallback_mode: FallbackMode::Throw,
+            poll_interval: Duration::from_secs(1),
+            wait_timeout: Duration::from_secs(120),
         }
     }
 
@@ -500,6 +487,19 @@ impl BlockingClientBuilder {
         self
     }
 
+    /// How often `optimize()` polls the job status while waiting (default 1 s).
+    pub fn poll_interval(mut self, interval: Duration) -> Self {
+        self.poll_interval = interval;
+        self
+    }
+
+    /// How long `optimize()` waits for the job to finish before `SmallPictError::Timeout`
+    /// (default 120 s). The job keeps running on the server.
+    pub fn wait_timeout(mut self, timeout: Duration) -> Self {
+        self.wait_timeout = timeout;
+        self
+    }
+
     pub fn build(self) -> Result<BlockingClient, SmallPictError> {
         let key = self.api_key.ok_or_else(|| SmallPictError::Validation {
             message: "Missing required SmallPict API key. Provide `.api_key(...)` or set SMALLPICT_API_KEY environment variable.".into(),
@@ -529,6 +529,8 @@ impl BlockingClientBuilder {
             timeout: self.timeout,
             max_retries: self.max_retries,
             fallback_mode: self.fallback_mode,
+            poll_interval: self.poll_interval,
+            wait_timeout: self.wait_timeout,
             http_client,
         })
     }

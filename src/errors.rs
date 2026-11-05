@@ -107,6 +107,17 @@ pub enum SmallPictError {
         request_id: Option<String>,
     },
 
+    /// `optimize()` failed after the API accepted the job: `code` is `upload_failed` (the
+    /// storage refused the PUT; `status` is its HTTP status) or `job_failed` (the job failed;
+    /// `details.job_id` names it).
+    #[error("[{}]: {}", .code.to_uppercase(), sanitize_message(.message))]
+    Optimize {
+        code: String,
+        message: String,
+        status: Option<u16>,
+        details: Option<serde_json::Value>,
+    },
+
     #[error("[TIMEOUT_ERROR]: {}", sanitize_message(.message))]
     Timeout { message: String },
 
@@ -164,7 +175,8 @@ impl SmallPictError {
             Self::Validation { details, .. }
             | Self::QuotaExceeded { details, .. }
             | Self::Forbidden { details, .. }
-            | Self::Server { details, .. } => details.as_ref(),
+            | Self::Server { details, .. }
+            | Self::Optimize { details, .. } => details.as_ref(),
             _ => None,
         }
     }
@@ -191,10 +203,12 @@ impl SmallPictError {
         }
     }
 
-    /// Server error code of an error mapped to `Server` (for example a 409), or `None`.
+    /// Server error code of an error mapped to `Server` (for example a 409), the
+    /// `upload_failed` / `job_failed` code of `Optimize`, or `None`.
     pub fn code(&self) -> Option<&str> {
         match self {
             Self::Server { code, .. } => code.as_deref(),
+            Self::Optimize { code, .. } => Some(code),
             _ => None,
         }
     }
@@ -211,4 +225,57 @@ pub(crate) fn is_purge_rate_limited(body: &[u8]) -> bool {
                 .map(|c| c == "purge_rate_limited")
         })
         .unwrap_or(false)
+}
+
+/// The pre-signed PUT of the image bytes was answered with a non-2xx status.
+pub(crate) fn upload_failed(status: u16, body: &str) -> SmallPictError {
+    let mut message = format!("Upload to staging failed with HTTP {status}");
+    if !body.is_empty() {
+        message = format!("{message}: {body}");
+    }
+    SmallPictError::Optimize {
+        code: "upload_failed".into(),
+        message,
+        status: Some(status),
+        details: None,
+    }
+}
+
+/// The job status reported `failed`; `error` is its `error` object.
+pub(crate) fn job_failed(job_id: &str, error: Option<&serde_json::Value>) -> SmallPictError {
+    let message = error
+        .and_then(|e| e.get("message"))
+        .and_then(|m| m.as_str())
+        .filter(|m| !m.is_empty())
+        .unwrap_or("The optimization job failed.");
+    SmallPictError::Optimize {
+        code: "job_failed".into(),
+        message: message.into(),
+        status: None,
+        details: Some(serde_json::json!({ "job_id": job_id })),
+    }
+}
+
+/// No final status within `wait`; the job keeps running on the server.
+pub(crate) fn job_timeout(job_id: &str, wait: std::time::Duration) -> SmallPictError {
+    SmallPictError::Timeout {
+        message: format!(
+            "Job {job_id} did not finish within {}ms; poll get_job_status(\"{job_id}\") later.",
+            wait.as_millis()
+        ),
+    }
+}
+
+/// `optimize_file` takes a local path; the API never fetches remote images.
+pub(crate) fn reject_url_source(path: &std::path::Path) -> Result<(), SmallPictError> {
+    let s = path.to_string_lossy();
+    if s.starts_with("http://") || s.starts_with("https://") {
+        return Err(SmallPictError::Validation {
+            message:
+                "The API does not fetch URLs: download the image and pass its bytes to optimize()."
+                    .into(),
+            details: None,
+        });
+    }
+    Ok(())
 }

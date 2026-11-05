@@ -300,14 +300,69 @@ pub struct OptimizeResult {
     pub compressed_size: u64,
     pub bytes_saved: u64,
     pub savings_percentage: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upload_url: Option<String>,
+    /// Mode the server applied, from the job status. `None` for a passthrough fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode_applied: Option<String>,
+    /// Quality the server applied, from the job status. `None` for a passthrough fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality_applied: Option<u32>,
     /// Upload folder stored with the job, as the server returns it (lower case); `None`
     /// without a folder, for a passthrough fallback, and from servers that do not send it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
     #[serde(skip)]
     pub data: Option<Vec<u8>>,
+}
+
+impl OptimizeResult {
+    /// The finished job: fields from the `completed` status, sizes from the bytes sent.
+    pub(crate) fn from_status(st: JobStatusResult, original_size: u64) -> Self {
+        let bytes_saved = st.bytes_saved.unwrap_or(0);
+        let savings_percentage = if original_size > 0 {
+            (bytes_saved as f64 / original_size as f64 * 10_000.0).round() / 100.0
+        } else {
+            0.0
+        };
+        Self {
+            job_id: st.job_id,
+            status: st.status,
+            url: st.url.unwrap_or_default(),
+            format: st.format.unwrap_or_default(),
+            original_size,
+            compressed_size: original_size.saturating_sub(bytes_saved),
+            bytes_saved,
+            savings_percentage,
+            mode_applied: st.mode_applied,
+            quality_applied: st.quality_applied,
+            folder: st.folder,
+            data: None,
+        }
+    }
+}
+
+/// Quota-exceeded fallback: the original bytes, nothing optimized.
+pub(crate) fn passthrough(data: &[u8], mime_type: &str) -> OptimizeResult {
+    OptimizeResult {
+        job_id: "fallback-passthrough".to_string(),
+        status: "completed".to_string(),
+        url: String::new(),
+        format: mime_type.trim_start_matches("image/").to_string(),
+        original_size: data.len() as u64,
+        compressed_size: data.len() as u64,
+        bytes_saved: 0,
+        savings_percentage: 0.0,
+        mode_applied: None,
+        quality_applied: None,
+        folder: None,
+        data: Some(data.to_vec()),
+    }
+}
+
+/// `POST /v1/optimize` answer: the queued job and where its bytes go.
+#[derive(Debug, Deserialize)]
+pub(crate) struct QueuedJob {
+    pub job_id: String,
+    pub upload_url: String,
 }
 
 /// Real-time quota and usage metrics.

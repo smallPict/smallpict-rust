@@ -7,8 +7,10 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
+use std::time::Duration;
 
-/// Answers every request with `status` and `body`; sends each request body (JSON) back
+/// Answers every request with `status` and `body` (an optimize POST is queued first, see
+/// below); sends each request body (JSON) back
 /// and counts the requests served.
 fn mock_server(
     status: u16,
@@ -16,6 +18,7 @@ fn mock_server(
 ) -> (String, mpsc::Receiver<Value>, Arc<AtomicUsize>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
+    let base = url.clone();
     let (tx, rx) = mpsc::channel();
     let hits = Arc::new(AtomicUsize::new(0));
     let counter = hits.clone();
@@ -23,6 +26,14 @@ fn mock_server(
         for stream in listener.incoming() {
             let stream = stream.unwrap();
             let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut first = String::new();
+            reader.read_line(&mut first).unwrap();
+            let method = first
+                .split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_string();
+            let is_optimize = first.contains(" /v1/optimize ");
             let mut len = 0;
             loop {
                 let mut line = String::new();
@@ -38,11 +49,17 @@ fn mock_server(
             reader.read_exact(&mut buf).unwrap();
             counter.fetch_add(1, Ordering::SeqCst);
             let _ = tx.send(serde_json::from_slice(&buf).unwrap_or(Value::Null));
+            // optimize() flow: a 200 POST queues the job, the PUT upload succeeds, the poll gets `body`.
+            let (status, reply) = match (method.as_str(), status) {
+                ("POST", 200) if is_optimize => (202, QUEUED.replace("{URL}", &base)),
+                ("PUT", _) => (200, String::new()),
+                _ => (status, body.to_string()),
+            };
             let mut stream = stream;
             write!(
                 stream,
-                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
+                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                reply.len()
             )
             .unwrap();
         }
@@ -55,10 +72,12 @@ fn client(url: &str, retries: u32) -> Client {
         .api_key("sp_sdk_test_1234567890")
         .base_url(url)
         .max_retries(retries)
+        .poll_interval(Duration::from_millis(1))
         .build()
         .unwrap()
 }
 
+const QUEUED: &str = r#"{"job_id":"j1","status":"queued","upload_url":"{URL}/staging/j1"}"#;
 const OK: &str = r#"{"job_id":"j1","status":"completed","url":"https://cdn/x"}"#;
 const PURGED: &str = r#"{"message":"Purge job enqueued successfully"}"#;
 
@@ -202,6 +221,7 @@ fn blocking_client_folder_purge_and_no_retry() {
             .api_key("sp_sdk_test_1234567890")
             .base_url(url)
             .max_retries(3)
+            .poll_interval(Duration::from_millis(1))
             .build()
             .unwrap()
     };

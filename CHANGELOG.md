@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-05
+
+### Fixed
+- **`optimize()` now returns an optimized image.** `POST /v1/optimize` only queues the job and returns a pre-signed `upload_url`; the SDK stopped there, so the worker failed every job with "client upload never arrived" and callers got an empty `url` with 0 % saved. `Client::optimize()` and `BlockingClient::optimize()` now PUT the bytes to `upload_url` (plain PUT with `Content-Type` and `Content-Length` as sent, no API headers, no retry), poll `GET /v1/optimize/status` every `poll_interval` (default 1 s) and return once the job is `completed`, with `url`, `format`, `bytes_saved`, `mode_applied`, `quality_applied` and `folder` from the job status (`SDK_SPEC.md` section 3d).
+
+### Added
+- `ClientBuilder::poll_interval()` and `wait_timeout()` (`Duration`, defaults 1 s and 120 s), also on `BlockingClientBuilder`.
+- `OptimizeResult::mode_applied` (`Option<String>`) and `quality_applied` (`Option<u32>`).
+- `SmallPictError::Optimize { code, message, status, details }`: code `job_failed` (a failed job, with the server's `error.message` and `details.job_id`) or `upload_failed` (the storage refused the PUT, with its HTTP status in `status`). `code()` and `details()` return them. A new variant of a public enum: an exhaustive `match` on `SmallPictError` needs an `Optimize` arm (source-breaking). A job still running after `wait_timeout` returns `SmallPictError::Timeout` with the job id in the message; it keeps running on the server.
+
+### Changed
+- **`OptimizeResult::status` is always `"completed"`** and `OptimizeResult::upload_url` is gone: there is no result to return before the job finished. Code that checked for `"queued"` or used `upload_url` to upload by itself can drop that.
+- **An `http(s)://` path passed to `optimize_file()` returns `SmallPictError::Validation`** before any request. The API never fetched URLs; the SDK does not download on your behalf.
+- `compressed_size` and `savings_percentage` are derived from the bytes sent and `bytes_saved` of the job status; `url` and `format` are never filled from the request.
+- README: "What `optimize()` does".
+
 ## [0.0.7] - 2026-10-31
 
 ### Added

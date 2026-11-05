@@ -13,7 +13,7 @@ Official Rust SDK for the [SmallPict Image Optimization API](https://smallpict.a
 - **🦀 Pure Rust TLS Stack:** Uses `rustls-tls` by default to avoid OpenSSL C-runtime issues.
 - **⚡ Dual Asynchronous & Blocking Modes:** High-concurrency `tokio` async client and optional sync `BlockingClient`.
 - **🛡️ Secure HMAC-SHA256 & Bearer Auth:** Tamper-proof payload verification.
-- **✨ 4 Core Unified Methods:** `optimize()`, `get_quota()`, `purge_cdn()`, and `validate_key()`.
+- **✨ 4 Core Unified Methods:** `optimize()` (uploads the image and waits for the finished job), `get_quota()`, `purge_cdn()`, and `validate_key()`.
 - **🔄 Resilience & Fault Tolerance:** Automatic `Idempotency-Key` UUID injection, 30s timeouts, and exponential backoff with jitter on HTTP 429/5xx.
 - **🔒 Zero-Leak Privacy:** API keys and credentials are automatically wrapped in `SecretRedacted` and masked in `Display`, `Debug`, and error logs.
 
@@ -84,6 +84,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("CDN URL: {}", result.url);
 
     Ok(())
+}
+```
+
+### What `optimize()` does
+
+`POST /v1/optimize` only queues a job. `optimize()` then uploads your bytes to the pre-signed `upload_url` the API returns (a plain PUT with `Content-Type` and `Content-Length`, no API headers), polls the job status every `poll_interval` (default 1 s) and returns once the job is `completed`, so `result.status` is always `"completed"` and `url`, `format`, `bytes_saved`, `mode_applied`, `quality_applied` and `folder` come from the finished job.
+
+- A failed job returns `SmallPictError::Optimize` with `code()` `Some("job_failed")`, the server's message and `details()["job_id"]`. A refused upload returns the same variant with code `upload_failed` and the storage's HTTP status.
+- A job still running after `wait_timeout` (default 120 s) returns `SmallPictError::Timeout` with the job id in the message; it keeps running on the server, so call `get_job_status(job_id)` later.
+- Pass the image bytes. The API does not fetch URLs: `optimize_file("https://...")` returns `SmallPictError::Validation` without a request; download the image yourself first.
+
+```rust
+use std::time::Duration;
+
+let client = Client::builder()
+    .api_key(std::env::var("SMALLPICT_API_KEY")?)
+    .poll_interval(Duration::from_millis(500))
+    .wait_timeout(Duration::from_secs(60))
+    .build()?;
+
+match client.optimize(&image_bytes, None).await {
+    Ok(result) => println!("{} ({} bytes saved)", result.url, result.bytes_saved),
+    Err(e) if e.code() == Some("job_failed") => println!("Job failed: {e}"),
+    Err(SmallPictError::Timeout { message }) => println!("Still running: {message}"),
+    Err(e) => return Err(e.into()),
 }
 ```
 

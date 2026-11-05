@@ -7,36 +7,55 @@ use smallpict::{Client, CompressionMode, OptimizeOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc;
+use std::time::Duration;
 
-/// Serves one HTTP request with `status` and `body`; sends the request body (JSON) back.
+/// Answers every request with `status` and `body` (an optimize POST is queued first, see
+/// below); sends each request body (JSON) back.
 fn mock_server(status: u16, body: &'static str) -> (String, mpsc::Receiver<Value>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
+    let base = url.clone();
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        let mut len = 0;
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            if line == "\r\n" || line.is_empty() {
-                break;
+        for stream in listener.incoming() {
+            let stream = stream.unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut first = String::new();
+            reader.read_line(&mut first).unwrap();
+            let method = first
+                .split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_string();
+            let is_optimize = first.contains(" /v1/optimize ");
+            let mut len = 0;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+                if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    len = v.trim().parse().unwrap();
+                }
             }
-            if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                len = v.trim().parse().unwrap();
-            }
+            let mut buf = vec![0; len];
+            reader.read_exact(&mut buf).unwrap();
+            let _ = tx.send(serde_json::from_slice(&buf).unwrap_or(Value::Null));
+            // optimize() flow: a 200 POST queues the job, the PUT upload succeeds, the poll gets `body`.
+            let (status, reply) = match (method.as_str(), status) {
+                ("POST", 200) if is_optimize => (202, QUEUED.replace("{URL}", &base)),
+                ("PUT", _) => (200, String::new()),
+                _ => (status, body.to_string()),
+            };
+            let mut stream = stream;
+            write!(
+                stream,
+                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                reply.len()
+            )
+            .unwrap();
         }
-        let mut buf = vec![0; len];
-        reader.read_exact(&mut buf).unwrap();
-        let _ = tx.send(serde_json::from_slice(&buf).unwrap_or(Value::Null));
-        let mut stream = stream;
-        write!(
-            stream,
-            "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        )
-        .unwrap();
     });
     (url, rx)
 }
@@ -46,10 +65,12 @@ fn client(url: &str) -> Client {
         .api_key("sp_sdk_test_1234567890")
         .base_url(url)
         .max_retries(0)
+        .poll_interval(Duration::from_millis(1))
         .build()
         .unwrap()
 }
 
+const QUEUED: &str = r#"{"job_id":"j1","status":"queued","upload_url":"{URL}/staging/j1"}"#;
 const OK: &str = r#"{"job_id":"j1","status":"completed","url":"https://cdn/x"}"#;
 
 /// (name, mode, lossless, expected wire mode or None when omitted)
@@ -182,6 +203,7 @@ fn blocking_client_maps_deprecated_flag() {
         .api_key("sp_sdk_test_1234567890")
         .base_url(url)
         .max_retries(0)
+        .poll_interval(Duration::from_millis(1))
         .build()
         .unwrap();
     let opts = OptimizeOptions::builder().lossless(true).build();
