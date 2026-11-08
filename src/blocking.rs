@@ -70,6 +70,7 @@ impl BlockingClient {
             .mime_type
             .clone()
             .or_else(|| opts.content_type.clone())
+            .or_else(|| crate::mime::detect_mime(data).map(str::to_string))
             .unwrap_or_else(|| "image/jpeg".into());
 
         let payload = serde_json::json!({

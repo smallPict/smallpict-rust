@@ -558,3 +558,38 @@ async fn status_poll_signs_the_path_without_the_query() {
     );
     assert_eq!(poll.header("x-signature"), Some(expected.as_str()));
 }
+
+async fn optimize_mime(bytes: &[u8], opts: Option<OptimizeOptions>) -> (String, String) {
+    let (url, rx) = server(vec![(202, QUEUED), (200, ""), (200, COMPLETED)]);
+    client(&url).optimize(bytes, opts).await.unwrap();
+    let post = next(&rx);
+    let put = next(&rx);
+    let body: serde_json::Value = serde_json::from_slice(&post.body).unwrap();
+    (
+        body["mime_type"].as_str().unwrap().to_string(),
+        put.header("content-type").unwrap().to_string(),
+    )
+}
+
+#[tokio::test]
+async fn mime_type_is_detected_from_the_bytes() {
+    assert_eq!(
+        optimize_mime(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR", None).await,
+        ("image/png".to_string(), "image/png".to_string())
+    );
+    assert_eq!(optimize_mime(b"GIF89a\x00\x00", None).await.0, "image/gif");
+    assert_eq!(
+        optimize_mime(b"RIFF\x00\x00\x00\x00WEBPVP8 ", None).await.0,
+        "image/webp"
+    );
+    assert_eq!(
+        optimize_mime(b"\x00\x00\x00\x1cftypavifmif1", None).await.0,
+        "image/avif"
+    );
+    assert_eq!(optimize_mime(b"not an image", None).await.0, "image/jpeg");
+    let explicit = OptimizeOptions::builder().mime_type("image/webp").build();
+    assert_eq!(
+        optimize_mime(b"\x89PNG\r\n\x1a\n", Some(explicit)).await.0,
+        "image/webp"
+    );
+}

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `mime_type` is detected from the first bytes (PNG, JPEG, GIF, WebP, AVIF) when the caller sets neither `mime_type` nor `content_type`; `image/jpeg` stays the fallback. `optimize_file("logo.png", None)` used to declare and upload the file as JPEG.
 - The signature covers the request path without the query string, as the contract says. The status poll used to sign `/v1/optimize/status?job_id=...`, which only worked through a server-side compatibility fallback.
 - Redirects are no longer followed. reqwest kept `X-API-Key`, `X-Timestamp`, `X-Signature` and `Idempotency-Key` on a cross-host redirect and re-sent the image body on a 307, so a redirecting proxy or base URL could receive a valid signed request. A 3xx now surfaces as `SmallPictError::Server` with that status.
 - An `idempotency_key` with a control or non-ASCII character returns `SmallPictError::Validation` instead of panicking inside `optimize()`.
