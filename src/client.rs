@@ -247,6 +247,11 @@ impl Client {
         };
 
         let url = format!("{}{}", self.base_url, normalized_path);
+        // The contract signs the path only; the server accepts path?query just as a fallback.
+        let sign_path = normalized_path
+            .split('?')
+            .next()
+            .unwrap_or(&normalized_path);
 
         let (body_bytes, body_hash) = if let Some(ref json_val) = payload {
             let bytes = serde_json::to_vec(json_val).map_err(SmallPictError::from)?;
@@ -285,12 +290,8 @@ impl Client {
                 headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
             }
 
-            let string_to_sign = crypto::build_string_to_sign(
-                method.as_str(),
-                &normalized_path,
-                &now_sec,
-                &body_hash,
-            );
+            let string_to_sign =
+                crypto::build_string_to_sign(method.as_str(), sign_path, &now_sec, &body_hash);
             let signature = crypto::hmac_sha256_hex(&self.secret_key.0, &string_to_sign);
             headers.insert(
                 HeaderName::from_static("x-timestamp"),

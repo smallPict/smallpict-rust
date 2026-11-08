@@ -537,3 +537,24 @@ async fn optimize_file_sends_the_file_name() {
     assert_eq!(body["filesize"], 5);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[tokio::test]
+async fn status_poll_signs_the_path_without_the_query() {
+    let (url, rx) = server(vec![(202, QUEUED), (200, ""), (200, COMPLETED)]);
+    client(&url).optimize(b"12345", png_opts()).await.unwrap();
+    next(&rx);
+    next(&rx);
+    let poll = next(&rx);
+    assert_eq!(poll.path, "/v1/optimize/status?job_id=j1");
+    let ts = poll.header("x-timestamp").unwrap();
+    let expected = smallpict::crypto::hmac_sha256_hex(
+        "sec_test_abcdefgh",
+        &smallpict::crypto::build_string_to_sign(
+            "GET",
+            "/v1/optimize/status",
+            ts,
+            smallpict::crypto::EMPTY_SHA256,
+        ),
+    );
+    assert_eq!(poll.header("x-signature"), Some(expected.as_str()));
+}
