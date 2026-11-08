@@ -15,8 +15,10 @@ pub fn sanitize_message(msg: &str) -> String {
 
     let key_re = KEY_REGEX
         .get_or_init(|| Regex::new(r"sp_(test|sdk|wp)_[a-zA-Z0-9_-]{10,}").expect("valid regex"));
-    let secret_re = SECRET_REGEX
-        .get_or_init(|| Regex::new(r"(?i)(sec|secret)_[a-zA-Z0-9_-]{8,}").expect("valid regex"));
+    // Server-issued secrets are "sps_" + hex; sec_/secret_ are the test fixtures.
+    let secret_re = SECRET_REGEX.get_or_init(|| {
+        Regex::new(r"(?i)(sps_[a-f0-9]{16,}|(sec|secret)_[a-zA-Z0-9_-]{8,})").expect("valid regex")
+    });
     let bearer_re = BEARER_REGEX
         .get_or_init(|| Regex::new(r"(?i)Bearer\s+[a-zA-Z0-9._-]+").expect("valid regex"));
 
@@ -47,8 +49,7 @@ impl<T: AsRef<str>> fmt::Debug for SecretRedacted<T> {
 
 impl<T: AsRef<str>> fmt::Display for SecretRedacted<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let sanitized = sanitize_message(self.0.as_ref());
-        write!(f, "{}", sanitized)
+        write!(f, "[REDACTED]")
     }
 }
 

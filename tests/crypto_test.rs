@@ -45,7 +45,14 @@ fn test_sanitize_message() {
 fn test_secret_redacted_wrapper() {
     let secret = SecretRedacted("sp_sdk_1234567890abcdef1234567890abcdef".to_string());
     assert_eq!(format!("{:?}", secret), "[REDACTED]");
-    let disp = format!("{}", secret);
-    assert!(!disp.contains("sp_sdk_1234567890abcdef1234567890abcdef"));
-    assert!(disp.contains("sp_sdk_123...cdef"));
+    assert_eq!(format!("{}", secret), "[REDACTED]");
+}
+
+#[test]
+fn secret_redacted_never_prints_a_server_issued_secret() {
+    let raw = format!("sps_{}", "ab12".repeat(16));
+    let secret = SecretRedacted(raw.clone());
+    assert_eq!(format!("{}", secret), "[REDACTED]");
+    assert_eq!(format!("{:?}", secret), "[REDACTED]");
+    assert!(!sanitize_message(&format!("bad key {raw}")).contains(&raw));
 }
