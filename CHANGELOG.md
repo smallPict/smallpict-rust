@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal: request preparation (path, body, idempotency key), per-attempt signed headers and the retry-or-fail decision live once in a crate-private `request` module; `Client` and `BlockingClient` keep only their send loop. The two 210-line `request()` copies are gone. No behaviour change.
 
 ### Fixed
+- A non-5xx status that reaches `SmallPictError::Server` (a 409 capacity code, a 3xx) is labelled with the server's code (or `API_ERROR`) instead of `[INTERNAL_ERROR]`, and `is_server_error()` is true only for 5xx.
 - `mime_type` is detected from the first bytes (PNG, JPEG, GIF, WebP, AVIF) when the caller sets neither `mime_type` nor `content_type`; `image/jpeg` stays the fallback. `optimize_file("logo.png", None)` used to declare and upload the file as JPEG.
 - The signature covers the request path without the query string, as the contract says. The status poll used to sign `/v1/optimize/status?job_id=...`, which only worked through a server-side compatibility fallback.
 - Redirects are no longer followed. reqwest kept `X-API-Key`, `X-Timestamp`, `X-Signature` and `Idempotency-Key` on a cross-host redirect and re-sent the image body on a 307, so a redirecting proxy or base URL could receive a valid signed request. A 3xx now surfaces as `SmallPictError::Server` with that status.

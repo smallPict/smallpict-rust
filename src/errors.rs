@@ -37,6 +37,16 @@ pub fn sanitize_message(msg: &str) -> String {
     res.into_owned()
 }
 
+/// Label of a `Server` error: the server code when it sent one, else INTERNAL_ERROR for a 5xx
+/// and API_ERROR for anything else that fell through the status mapping.
+fn server_label(code: Option<&str>, status: u16) -> &str {
+    match code {
+        Some(c) => c,
+        None if status >= 500 => "INTERNAL_ERROR",
+        None => "API_ERROR",
+    }
+}
+
 /// A wrapper struct for secrets that hides their contents in `Display` and `Debug`.
 #[derive(Clone, PartialEq, Eq)]
 pub struct SecretRedacted<T>(pub T);
@@ -97,7 +107,7 @@ pub enum SmallPictError {
         request_id: Option<String>,
     },
 
-    #[error("[INTERNAL_ERROR] HTTP {status}: {}", sanitize_message(.message))]
+    #[error("[{}] HTTP {status}: {}", server_label(.code.as_deref(), *.status), sanitize_message(.message))]
     Server {
         status: u16,
         message: String,
@@ -166,8 +176,10 @@ impl SmallPictError {
         matches!(self, Self::RateLimit { .. })
     }
 
+    /// True for a 5xx answer. A 409 or other non-5xx status also lands in `Server`, with its
+    /// server code, but is not a server fault.
     pub fn is_server_error(&self) -> bool {
-        matches!(self, Self::Server { .. })
+        matches!(self, Self::Server { status, .. } if *status >= 500)
     }
 
     /// Error details from the server (`error.details`), when the variant carries them.

@@ -593,3 +593,22 @@ async fn mime_type_is_detected_from_the_bytes() {
         "image/webp"
     );
 }
+
+#[tokio::test]
+async fn non_5xx_statuses_are_not_labelled_internal_error() {
+    let (url, _rx) = server(vec![(
+        409,
+        r#"{"error":{"code":"booster_period_limit_exceeded","message":"limit"}}"#,
+    )]);
+    let err = client(&url).get_quota().await.unwrap_err();
+    assert!(
+        matches!(err, SmallPictError::Server { status: 409, .. }),
+        "{err}"
+    );
+    assert!(
+        err.to_string()
+            .starts_with("[booster_period_limit_exceeded]"),
+        "{err}"
+    );
+    assert!(!err.is_server_error(), "{err}");
+}
