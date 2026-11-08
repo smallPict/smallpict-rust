@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- HTTP stack moved to reqwest 0.12 (hyper 1, rustls 0.23). reqwest 0.11 and rustls 0.21 no longer receive releases, so the next TLS or HTTP/2 advisory would have had no fix. No API change for callers; the `rustls-tls`, `native-tls` and `blocking` features keep their names. `rust-version` stays 1.75.0: the CI MSRV job resolves the lockfile with the MSRV-aware resolver first, because the newest `icu_*` and `zeroize` releases (pulled through `url`) need Rust 1.85 or newer while older releases that fit 1.75 exist.
 - `optimize_bytes(Bytes, options)` on both clients uploads the caller's buffer without copying it; `optimize(&[u8], ..)` copies once and `optimize_file` hands over the `Vec` it read. Before, the PUT body was a second copy of every image.
 - Features: the `async` feature enables only `tokio`, `blocking` only `reqwest/blocking`, so `rustls-tls` and `native-tls` are independent (before, both forced rustls and `native-tls` could not turn it off). The library no longer asks for reqwest `stream` or tokio `macros`/`rt-multi-thread`, which it never used. Default features are unchanged (`async`, `rustls-tls`).
 - Internal: request preparation (path, body, idempotency key), per-attempt signed headers and the retry-or-fail decision live once in a crate-private `request` module; `Client` and `BlockingClient` keep only their send loop. The two 210-line `request()` copies are gone. No behaviour change.

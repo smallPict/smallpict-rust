@@ -31,10 +31,16 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Resolve with stable's MSRV-aware resolver: the newest icu/zeroize releases need Rust 1.85+,
+      # older ones that satisfy rust-version exist, and cargo 1.75 cannot pick them by itself.
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - run: CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo generate-lockfile
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: 1.75.0
-      - run: cargo build --all-features
+      - run: cargo +1.75.0 build --all-features --locked
 
   audit:
     name: cargo audit

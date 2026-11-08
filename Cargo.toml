@@ -20,7 +20,7 @@ rustls-tls = ["reqwest/rustls-tls"]
 native-tls = ["reqwest/default-tls"]
 
 [dependencies]
-reqwest = { version = "0.11", default-features = false, features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
 tokio = { version = "1.0", features = ["time", "fs"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
