@@ -6,6 +6,7 @@ use crate::models::{
     PurgeResponse, PurgeType, QueuedJob, QuotaResponse,
 };
 use crate::request;
+use bytes::Bytes;
 use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use serde_json::Value;
 use std::env;
@@ -49,9 +50,20 @@ impl Client {
     /// Errors: `SmallPictError::Optimize` with code `job_failed` (the server's message,
     /// `details.job_id`) or `upload_failed` (the storage refused the PUT), and
     /// `SmallPictError::Timeout` naming the job when it is still running after `wait_timeout`.
+    /// Optimizes raw in-memory image bytes; see [`Self::optimize_bytes`] to avoid the copy.
     pub async fn optimize(
         &self,
         data: &[u8],
+        options: Option<OptimizeOptions>,
+    ) -> Result<OptimizeResult, SmallPictError> {
+        self.optimize_bytes(Bytes::copy_from_slice(data), options)
+            .await
+    }
+
+    /// Like [`Self::optimize`] but takes ownership of the buffer, so the upload sends it without a copy.
+    pub async fn optimize_bytes(
+        &self,
+        data: Bytes,
         options: Option<OptimizeOptions>,
     ) -> Result<OptimizeResult, SmallPictError> {
         let mut opts = options.unwrap_or_default();
@@ -64,7 +76,7 @@ impl Client {
             .mime_type
             .clone()
             .or_else(|| opts.content_type.clone())
-            .or_else(|| crate::mime::detect_mime(data).map(str::to_string))
+            .or_else(|| crate::mime::detect_mime(&data).map(str::to_string))
             .unwrap_or_else(|| "image/jpeg".into());
 
         let payload = serde_json::json!({
@@ -87,14 +99,15 @@ impl Client {
             Ok(val) => serde_json::from_value::<QueuedJob>(val)?,
             Err(e) => {
                 if e.is_quota_exceeded() && self.fallback_mode == FallbackMode::Passthrough {
-                    return Ok(passthrough(data, &mime_type));
+                    return Ok(passthrough(&data, &mime_type));
                 }
                 return Err(e);
             }
         };
 
         // The worker waits 30 s from the request for the object: upload now, poll after.
-        self.upload(&queued.upload_url, data, &mime_type).await?;
+        self.upload(&queued.upload_url, data.clone(), &mime_type)
+            .await?;
 
         let deadline = Instant::now() + self.wait_timeout;
         loop {
@@ -118,13 +131,13 @@ impl Client {
     /// PUTs the bytes to the pre-signed `upload_url` with only `Content-Type` and
     /// `Content-Length`: S3 refuses other signed headers. No retry: the worker stops
     /// waiting for the object 30 s after the job was queued.
-    async fn upload(&self, url: &str, data: &[u8], mime_type: &str) -> Result<(), SmallPictError> {
+    async fn upload(&self, url: &str, data: Bytes, mime_type: &str) -> Result<(), SmallPictError> {
         let resp = self
             .http_client
             .put(url)
             .header(CONTENT_TYPE, mime_type)
             .header(CONTENT_LENGTH, data.len())
-            .body(data.to_vec())
+            .body(data)
             .timeout(self.timeout)
             .send()
             .await
@@ -157,7 +170,7 @@ impl Client {
             }
         }
 
-        self.optimize(&bytes, Some(opts)).await
+        self.optimize_bytes(Bytes::from(bytes), Some(opts)).await
     }
 
     /// Retrieves real-time account quota usage and egress metrics.
