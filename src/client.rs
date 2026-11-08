@@ -24,6 +24,7 @@ pub struct Client {
     pub(crate) base_url: String,
     pub(crate) timeout: Duration,
     pub(crate) max_retries: u32,
+    pub(crate) max_retry_delay: Duration,
     pub(crate) fallback_mode: FallbackMode,
     pub(crate) poll_interval: Duration,
     pub(crate) wait_timeout: Duration,
@@ -329,7 +330,8 @@ impl Client {
                 Ok(r) => r,
                 Err(e) => {
                     if attempt <= self.max_retries {
-                        let delay = base_delay * (1 << (attempt - 1));
+                        let delay = (base_delay * (1u32 << attempt.saturating_sub(1).min(10)))
+                            .min(self.max_retry_delay);
                         tokio::time::sleep(delay).await;
                         continue;
                     }
@@ -356,10 +358,11 @@ impl Client {
                 || (status.is_server_error() && status.as_u16() <= 504))
                 && attempt <= self.max_retries
             {
-                let mut delay = base_delay * (1 << (attempt - 1));
+                let mut delay = base_delay * (1u32 << attempt.saturating_sub(1).min(10));
                 if let Some(sec) = retry_after {
                     delay = Duration::from_secs(sec);
                 }
+                delay = delay.min(self.max_retry_delay);
                 let jitter = Duration::from_millis(rand::thread_rng().gen_range(0..100));
                 tokio::time::sleep(delay + jitter).await;
                 continue;
@@ -440,6 +443,7 @@ pub struct ClientBuilder {
     base_url: Option<String>,
     timeout: Duration,
     max_retries: u32,
+    max_retry_delay: Duration,
     fallback_mode: FallbackMode,
     poll_interval: Duration,
     wait_timeout: Duration,
@@ -459,6 +463,7 @@ impl ClientBuilder {
             base_url: env::var("SMALLPICT_BASE_URL").ok(),
             timeout: Duration::from_secs(30),
             max_retries: 3,
+            max_retry_delay: Duration::from_secs(30),
             fallback_mode: FallbackMode::Throw,
             poll_interval: Duration::from_secs(1),
             wait_timeout: Duration::from_secs(120),
@@ -487,6 +492,12 @@ impl ClientBuilder {
 
     pub fn max_retries(mut self, retries: u32) -> Self {
         self.max_retries = retries;
+        self
+    }
+
+    /// Longest wait between attempts, whatever `Retry-After` says (default 30 s).
+    pub fn max_retry_delay(mut self, delay: Duration) -> Self {
+        self.max_retry_delay = delay;
         self
     }
 
@@ -544,6 +555,7 @@ impl ClientBuilder {
             base_url: base,
             timeout: self.timeout,
             max_retries: self.max_retries,
+            max_retry_delay: self.max_retry_delay,
             fallback_mode: self.fallback_mode,
             poll_interval: self.poll_interval,
             wait_timeout: self.wait_timeout,

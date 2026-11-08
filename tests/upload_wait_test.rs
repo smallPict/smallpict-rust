@@ -26,6 +26,13 @@ impl Req {
 /// Answers the requests in order with `replies` (status, body; `{URL}` becomes the server URL),
 /// repeating the last one once they run out, and sends every request back.
 fn server(replies: Vec<(u16, &'static str)>) -> (String, mpsc::Receiver<Req>) {
+    server_with_headers(replies.into_iter().map(|(s, r)| (s, r, "")).collect())
+}
+
+/// Like `server`, with extra raw header lines (each ending in `\r\n`) per reply.
+fn server_with_headers(
+    replies: Vec<(u16, &'static str, &'static str)>,
+) -> (String, mpsc::Receiver<Req>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let base = url.clone();
@@ -62,12 +69,12 @@ fn server(replies: Vec<(u16, &'static str)>) -> (String, mpsc::Receiver<Req>) {
                 headers,
                 body,
             });
-            let (status, reply) = replies[i.min(replies.len() - 1)];
+            let (status, reply, extra) = replies[i.min(replies.len() - 1)];
             let reply = reply.replace("{URL}", &base);
             let mut stream = stream;
             write!(
                 stream,
-                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{reply}",
                 reply.len()
             )
             .unwrap();
@@ -350,4 +357,61 @@ async fn upload_failed_message_is_truncated() {
         .unwrap_err();
     assert_eq!(err.code(), Some("upload_failed"));
     assert!(err.to_string().len() < 400, "{}", err.to_string().len());
+}
+
+#[tokio::test]
+async fn retry_after_is_capped_and_large_max_retries_does_not_panic() {
+    let (url, rx) = server(vec![(503, SERVER_ERROR)]);
+    let c = Client::builder()
+        .api_key("sp_sdk_test_1234567890")
+        .secret_key("sec_test_abcdefgh")
+        .base_url(url)
+        .max_retries(40)
+        .max_retry_delay(Duration::from_millis(5))
+        .build()
+        .unwrap();
+    let started = std::time::Instant::now();
+    let err = c
+        .purge_cdn(&["https://cdn/x.avif"], smallpict::PurgeType::Url)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, SmallPictError::Server { status: 503, .. }),
+        "{err}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    let mut count = 0;
+    while rx.try_recv().is_ok() {
+        count += 1;
+    }
+    assert_eq!(count, 41);
+}
+
+#[tokio::test]
+async fn retry_after_header_is_capped() {
+    let (url, _rx) = server_with_headers(vec![
+        (503, SERVER_ERROR, "Retry-After: 3600\r\n"),
+        (202, PURGED, ""),
+    ]);
+    let c = Client::builder()
+        .api_key("sp_sdk_test_1234567890")
+        .secret_key("sec_test_abcdefgh")
+        .base_url(url)
+        .max_retries(1)
+        .max_retry_delay(Duration::from_millis(5))
+        .build()
+        .unwrap();
+    let started = std::time::Instant::now();
+    c.purge_cdn(&["https://cdn/x.avif"], smallpict::PurgeType::Url)
+        .await
+        .unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
 }
