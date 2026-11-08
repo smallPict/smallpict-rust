@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Every request carries a fresh `X-Nonce`, so a retry inside the same second, or two same-second requests with identical bodies, are no longer refused by the server as a replay (401 "Replay attack detected"); before, a transient 429 or 5xx could surface as `SmallPictError::Unauthorized`.
+- `Idempotency-Key` is generated once per call and kept across retries instead of once per attempt.
+
 ### Changed
 - Release workflow runs `cargo test --all-features` before `cargo publish`; a tag on a commit that fails it no longer publishes. CI also builds on the declared `rust-version` (1.75.0) and runs `cargo audit`. Actions are pinned to commit SHAs.
 

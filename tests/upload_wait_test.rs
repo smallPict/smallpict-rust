@@ -266,3 +266,58 @@ fn blocking_client_uploads_then_polls() {
         .unwrap_err()
         .is_validation_error());
 }
+
+const SERVER_ERROR: &str = r#"{"error":{"code":"INTERNAL_ERROR","message":"try again"}}"#;
+const PURGED: &str = r#"{"message":"Purge accepted"}"#;
+
+#[tokio::test]
+async fn retry_sends_new_nonce_and_same_idempotency_key() {
+    let (url, rx) = server(vec![(503, SERVER_ERROR), (202, PURGED)]);
+    let c = Client::builder()
+        .api_key("sp_sdk_test_1234567890")
+        .secret_key("sec_test_abcdefgh")
+        .base_url(url)
+        .max_retries(1)
+        .build()
+        .unwrap();
+    c.purge_cdn(&["https://cdn/x.avif"], smallpict::PurgeType::Url)
+        .await
+        .unwrap();
+    let first = next(&rx);
+    let second = next(&rx);
+    assert!(
+        first.header("x-nonce").is_some(),
+        "no X-Nonce on the first attempt"
+    );
+    assert_ne!(first.header("x-nonce"), second.header("x-nonce"));
+    assert_eq!(
+        first.header("idempotency-key"),
+        second.header("idempotency-key")
+    );
+}
+
+#[cfg(feature = "blocking")]
+#[test]
+fn blocking_retry_sends_new_nonce_and_same_idempotency_key() {
+    let (url, rx) = server(vec![(503, SERVER_ERROR), (202, PURGED)]);
+    let c = smallpict::BlockingClient::builder()
+        .api_key("sp_sdk_test_1234567890")
+        .secret_key("sec_test_abcdefgh")
+        .base_url(url)
+        .max_retries(1)
+        .build()
+        .unwrap();
+    c.purge_cdn(&["https://cdn/x.avif"], smallpict::PurgeType::Url)
+        .unwrap();
+    let first = next(&rx);
+    let second = next(&rx);
+    assert!(
+        first.header("x-nonce").is_some(),
+        "no X-Nonce on the first attempt"
+    );
+    assert_ne!(first.header("x-nonce"), second.header("x-nonce"));
+    assert_eq!(
+        first.header("idempotency-key"),
+        second.header("idempotency-key")
+    );
+}

@@ -46,6 +46,7 @@ impl Client {
     /// Queues the job, PUTs the bytes to the pre-signed `upload_url` the API returns, and
     /// polls the job status every `poll_interval` until it is completed. Returns the finished
     /// job (`url`, `format`, `bytes_saved`, `mode_applied`, `quality_applied`, `folder`).
+    /// A retry after a 5xx may create a second job until the server honours `Idempotency-Key`.
     ///
     /// Errors: `SmallPictError::Optimize` with code `job_failed` (the server's message,
     /// `details.job_id`) or `upload_failed` (the storage refused the PUT), and
@@ -250,6 +251,9 @@ impl Client {
             (None, EMPTY_SHA256.to_string())
         };
 
+        let idemp = idempotency_key
+            .map(ToString::to_string)
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
         let mut attempt = 0;
         let base_delay = Duration::from_millis(250);
 
@@ -305,13 +309,15 @@ impl Client {
                 );
             }
 
+            // The server rejects a repeated signature as a replay unless the nonce differs.
+            headers.insert(
+                HeaderName::from_static("x-nonce"),
+                HeaderValue::from_str(&Uuid::new_v4().to_string()).expect("valid uuid"),
+            );
             if matches!(
                 method,
                 reqwest::Method::POST | reqwest::Method::PATCH | reqwest::Method::DELETE
             ) {
-                let idemp = idempotency_key
-                    .map(ToString::to_string)
-                    .unwrap_or_else(|| Uuid::new_v4().to_string());
                 headers.insert(
                     HeaderName::from_static("idempotency-key"),
                     HeaderValue::from_str(&idemp).expect("valid uuid"),
