@@ -58,6 +58,7 @@ pub mod crypto;
 pub mod errors;
 pub(crate) mod mime;
 pub mod models;
+pub(crate) mod request;
 
 #[cfg(feature = "async")]
 pub mod client;

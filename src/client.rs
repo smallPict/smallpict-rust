@@ -1,20 +1,16 @@
-use crate::crypto::{self, EMPTY_SHA256};
 use crate::errors::{
-    is_purge_rate_limited, job_failed, job_timeout, reject_url_source, upload_failed,
-    SecretRedacted, SmallPictError,
+    job_failed, job_timeout, reject_url_source, upload_failed, SecretRedacted, SmallPictError,
 };
 use crate::models::{
     check_folder, passthrough, FallbackMode, JobStatusResult, OptimizeOptions, OptimizeResult,
     PurgeResponse, PurgeType, QueuedJob, QuotaResponse,
 };
-use bytes::Bytes;
-use rand::Rng;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
+use crate::request;
+use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use serde_json::Value;
 use std::env;
 use std::path::Path;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use uuid::Uuid;
+use std::time::{Duration, Instant};
 
 /// Asynchronous client for interacting with the SmallPict API.
 #[derive(Clone, Debug)]
@@ -235,203 +231,44 @@ impl Client {
         payload: Option<Value>,
         idempotency_key: Option<&str>,
     ) -> Result<Value, SmallPictError> {
-        let clean_path = if path.starts_with('/') {
-            path.to_string()
-        } else {
-            format!("/{}", path)
-        };
-        let normalized_path = if !clean_path.starts_with("/v1/") && !clean_path.starts_with("/v2/")
-        {
-            format!("/v1{}", clean_path)
-        } else {
-            clean_path
-        };
-
-        let url = format!("{}{}", self.base_url, normalized_path);
-        // The contract signs the path only; the server accepts path?query just as a fallback.
-        let sign_path = normalized_path
-            .split('?')
-            .next()
-            .unwrap_or(&normalized_path);
-
-        let (body_bytes, body_hash) = if let Some(ref json_val) = payload {
-            let bytes = serde_json::to_vec(json_val).map_err(SmallPictError::from)?;
-            let hash = crypto::sha256_hex(&bytes);
-            (Some(Bytes::from(bytes)), hash)
-        } else {
-            (None, EMPTY_SHA256.to_string())
-        };
-
-        let idemp = idempotency_key
-            .map(ToString::to_string)
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let prepared = request::prepare(&self.base_url, path, payload.as_ref(), idempotency_key)?;
         let mut attempt = 0;
-        let base_delay = Duration::from_millis(250);
 
         while attempt <= self.max_retries {
             attempt += 1;
-
-            let now_sec = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs()
-                .to_string();
-
-            let mut headers = HeaderMap::new();
-            headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
-            headers.insert(
-                HeaderName::from_static("x-api-key"),
-                HeaderValue::from_str(&self.api_key.0).map_err(|_| SmallPictError::Validation {
-                    message: "Invalid characters in API key".into(),
-                    details: None,
-                })?,
-            );
-
-            if body_bytes.is_some() {
-                headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-            }
-
-            let string_to_sign =
-                crypto::build_string_to_sign(method.as_str(), sign_path, &now_sec, &body_hash);
-            let signature = crypto::hmac_sha256_hex(&self.secret_key.0, &string_to_sign);
-            headers.insert(
-                HeaderName::from_static("x-timestamp"),
-                HeaderValue::from_str(&now_sec).expect("valid ascii"),
-            );
-            headers.insert(
-                HeaderName::from_static("x-signature"),
-                HeaderValue::from_str(&signature).expect("valid ascii"),
-            );
-
-            // The server rejects a repeated signature as a replay unless the nonce differs.
-            headers.insert(
-                HeaderName::from_static("x-nonce"),
-                HeaderValue::from_str(&Uuid::new_v4().to_string()).expect("valid uuid"),
-            );
-            if matches!(
-                method,
-                reqwest::Method::POST | reqwest::Method::PATCH | reqwest::Method::DELETE
-            ) {
-                headers.insert(
-                    HeaderName::from_static("idempotency-key"),
-                    HeaderValue::from_str(&idemp).map_err(|_| SmallPictError::Validation {
-                        message: "idempotency_key must be visible ASCII".into(),
-                        details: None,
-                    })?,
-                );
-            }
-
+            let headers =
+                request::headers(&self.api_key.0, &self.secret_key.0, &method, &prepared)?;
             let mut req = self
                 .http_client
-                .request(method.clone(), &url)
+                .request(method.clone(), &prepared.url)
                 .headers(headers)
                 .timeout(self.timeout);
-
-            if let Some(ref b) = body_bytes {
+            if let Some(ref b) = prepared.body {
                 req = req.body(b.clone());
             }
 
             let resp = match req.send().await {
                 Ok(r) => r,
                 Err(e) => {
-                    if attempt <= self.max_retries {
-                        let delay = (base_delay * (1u32 << attempt.saturating_sub(1).min(10)))
-                            .min(self.max_retry_delay);
-                        tokio::time::sleep(delay).await;
-                        continue;
+                    match request::transport_retry(attempt, self.max_retries, self.max_retry_delay)
+                    {
+                        Some(delay) => {
+                            tokio::time::sleep(delay).await;
+                            continue;
+                        }
+                        None => return Err(SmallPictError::Network { source: e }),
                     }
-                    return Err(SmallPictError::Network { source: e });
                 }
             };
-
             let status = resp.status();
-            let req_id = resp
-                .headers()
-                .get("x-request-id")
-                .and_then(|v| v.to_str().ok())
-                .map(ToString::to_string);
-            let retry_after = resp
-                .headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<u64>().ok());
+            let resp_headers = resp.headers().clone();
+            let body = resp.bytes().await.map_err(SmallPictError::from)?;
+            let response = request::Response::new(status, &resp_headers, body);
 
-            let resp_bytes = resp.bytes().await.map_err(SmallPictError::from)?;
-
-            if ((status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                && !is_purge_rate_limited(&resp_bytes))
-                || (status.is_server_error() && status.as_u16() <= 504))
-                && attempt <= self.max_retries
-            {
-                let mut delay = base_delay * (1u32 << attempt.saturating_sub(1).min(10));
-                if let Some(sec) = retry_after {
-                    delay = Duration::from_secs(sec);
-                }
-                delay = delay.min(self.max_retry_delay);
-                let jitter = Duration::from_millis(rand::thread_rng().gen_range(0..100));
-                tokio::time::sleep(delay + jitter).await;
-                continue;
+            match request::classify(response, attempt, self.max_retries, self.max_retry_delay) {
+                request::Outcome::Retry(delay) => tokio::time::sleep(delay).await,
+                request::Outcome::Done(result) => return result,
             }
-
-            let parsed_json: Result<Value, _> = serde_json::from_slice(&resp_bytes);
-
-            if !status.is_success() {
-                let mut message = format!("API request failed with HTTP {}", status.as_u16());
-                let mut details = None;
-                let mut code = None;
-
-                if let Ok(ref val) = parsed_json {
-                    if let Some(err_obj) = val.get("error") {
-                        if let Some(m) = err_obj.get("message").and_then(|v| v.as_str()) {
-                            message = m.to_string();
-                        }
-                        if let Some(c) = err_obj.get("code").and_then(|v| v.as_str()) {
-                            code = Some(c.to_string());
-                        }
-                        if let Some(d) = err_obj.get("details") {
-                            details = Some(d.clone());
-                        }
-                    } else if let Some(m) = val.get("message").and_then(|v| v.as_str()) {
-                        message = m.to_string();
-                    }
-                }
-
-                return match status.as_u16() {
-                    400 => Err(SmallPictError::Validation { message, details }),
-                    401 => Err(SmallPictError::Unauthorized {
-                        message,
-                        request_id: req_id,
-                    }),
-                    402 => Err(SmallPictError::QuotaExceeded {
-                        message,
-                        details,
-                        request_id: req_id,
-                    }),
-                    403 => Err(SmallPictError::Forbidden {
-                        message,
-                        details,
-                        request_id: req_id,
-                    }),
-                    404 => Err(SmallPictError::NotFound {
-                        message,
-                        request_id: req_id,
-                    }),
-                    429 => Err(SmallPictError::RateLimit {
-                        message,
-                        retry_after,
-                        request_id: req_id,
-                    }),
-                    _ => Err(SmallPictError::Server {
-                        status: status.as_u16(),
-                        message,
-                        code,
-                        details,
-                        request_id: req_id,
-                    }),
-                };
-            }
-
-            return parsed_json.map_err(SmallPictError::from);
         }
 
         Err(SmallPictError::Timeout {
