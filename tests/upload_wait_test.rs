@@ -612,3 +612,18 @@ async fn non_5xx_statuses_are_not_labelled_internal_error() {
     );
     assert!(!err.is_server_error(), "{err}");
 }
+
+const COMPLETED_NEGATIVE_SAVINGS: &str = r#"{"job_id":"j1","status":"completed","url":"https://cdn/x.avif","format":"avif","bytes_saved":-5}"#;
+
+#[tokio::test]
+async fn negative_bytes_saved_is_clamped_to_zero() {
+    let (url, _rx) = server(vec![
+        (202, QUEUED),
+        (200, ""),
+        (200, COMPLETED_NEGATIVE_SAVINGS),
+    ]);
+    let res = client(&url).optimize(b"12345", png_opts()).await.unwrap();
+    assert_eq!(res.bytes_saved, 0);
+    assert_eq!(res.compressed_size, 5);
+    assert_eq!(res.savings_percentage, 0.0);
+}

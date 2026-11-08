@@ -54,3 +54,12 @@ fn test_serde_models() {
     let purge: PurgeResponse = serde_json::from_str(purge_json).expect("valid purge deserialize");
     assert_eq!(purge.message, "Purge completed");
 }
+
+#[test]
+fn negative_bytes_saved_parses() {
+    let st: smallpict::models::JobStatusResult = serde_json::from_str(
+        r#"{"job_id":"j1","status":"completed","url":"u","format":"webp","bytes_saved":-5}"#,
+    )
+    .unwrap();
+    assert_eq!(st.bytes_saved, Some(-5));
+}

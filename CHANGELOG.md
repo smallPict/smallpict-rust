@@ -8,10 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- `optimize_bytes(Bytes, options)` on both clients uploads the caller's buffer without copying it; `optimize(&[u8], ..)` copies once and `optimize_file` hands over the `Vec` it read. Before, the PUT body was a second copy of every image.
 - Features: the `async` feature enables only `tokio`, `blocking` only `reqwest/blocking`, so `rustls-tls` and `native-tls` are independent (before, both forced rustls and `native-tls` could not turn it off). The library no longer asks for reqwest `stream` or tokio `macros`/`rt-multi-thread`, which it never used. Default features are unchanged (`async`, `rustls-tls`).
 - Internal: request preparation (path, body, idempotency key), per-attempt signed headers and the retry-or-fail decision live once in a crate-private `request` module; `Client` and `BlockingClient` keep only their send loop. The two 210-line `request()` copies are gone. No behaviour change.
 
 ### Fixed
+- A negative `bytes_saved` in a job status (an output larger than its input) no longer fails the whole `optimize()` with a `Serialization` error after the job succeeded; it is read as a signed integer and clamped to 0.
 - A non-5xx status that reaches `SmallPictError::Server` (a 409 capacity code, a 3xx) is labelled with the server's code (or `API_ERROR`) instead of `[INTERNAL_ERROR]`, and `is_server_error()` is true only for 5xx.
 - `mime_type` is detected from the first bytes (PNG, JPEG, GIF, WebP, AVIF) when the caller sets neither `mime_type` nor `content_type`; `image/jpeg` stays the fallback. `optimize_file("logo.png", None)` used to declare and upload the file as JPEG.
 - The signature covers the request path without the query string, as the contract says. The status poll used to sign `/v1/optimize/status?job_id=...`, which only worked through a server-side compatibility fallback.

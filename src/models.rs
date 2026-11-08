@@ -317,7 +317,7 @@ pub struct OptimizeResult {
 impl OptimizeResult {
     /// The finished job: fields from the `completed` status, sizes from the bytes sent.
     pub(crate) fn from_status(st: JobStatusResult, original_size: u64) -> Self {
-        let bytes_saved = st.bytes_saved.unwrap_or(0);
+        let bytes_saved = st.bytes_saved.unwrap_or(0).max(0) as u64;
         let savings_percentage = if original_size > 0 {
             (bytes_saved as f64 / original_size as f64 * 10_000.0).round() / 100.0
         } else {
@@ -463,7 +463,8 @@ pub struct JobStatusResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub bytes_saved: Option<u64>,
+    /// Signed: the server reports input minus output, which can be negative.
+    pub bytes_saved: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
