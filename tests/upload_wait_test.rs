@@ -324,3 +324,30 @@ fn blocking_retry_sends_new_nonce_and_same_idempotency_key() {
         second.header("idempotency-key")
     );
 }
+
+const QUEUED_DEAD_UPLOAD: &str = r#"{"job_id":"j1","status":"queued","upload_url":"http://127.0.0.1:9/staging/j1?X-Amz-Signature=abc","object_key":"k","bucket":"b"}"#;
+
+#[tokio::test]
+async fn upload_transport_error_does_not_leak_the_presigned_url() {
+    let (url, _rx) = server(vec![(202, QUEUED_DEAD_UPLOAD)]);
+    let err = client(&url)
+        .optimize(b"12345", png_opts())
+        .await
+        .unwrap_err();
+    let text = err.to_string();
+    assert!(matches!(err, SmallPictError::Network { .. }), "{text}");
+    assert!(!text.contains("X-Amz-Signature"), "{text}");
+    assert!(!text.contains("127.0.0.1:9"), "{text}");
+}
+
+#[tokio::test]
+async fn upload_failed_message_is_truncated() {
+    let big: &'static str = Box::leak("x".repeat(5000).into_boxed_str());
+    let (url, _rx) = server(vec![(202, QUEUED), (403, big)]);
+    let err = client(&url)
+        .optimize(b"12345", png_opts())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Some("upload_failed"));
+    assert!(err.to_string().len() < 400, "{}", err.to_string().len());
+}

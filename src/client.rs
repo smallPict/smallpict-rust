@@ -129,7 +129,10 @@ impl Client {
             .body(data.to_vec())
             .timeout(self.timeout)
             .send()
-            .await?;
+            .await
+            .map_err(|e| SmallPictError::Network {
+                source: e.without_url(),
+            })?;
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();

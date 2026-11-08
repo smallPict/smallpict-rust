@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- A transport failure during the upload PUT no longer puts the pre-signed S3 URL (with its `X-Amz-Signature`) into the `Network` error message; whoever read the log could have overwritten the staging object. The `upload_failed` message keeps at most 300 characters of the storage body.
 - `SecretRedacted`'s `Display` prints `[REDACTED]` like `Debug`. It used to run the message sanitizer, whose pattern knew only `sec_`/`secret_` fixtures, so `println!("{}", secret)` printed a real `sps_...` secret in full. `sanitize_message` now masks `sps_...` secrets too.
 - Every request carries a fresh `X-Nonce`, so a retry inside the same second, or two same-second requests with identical bodies, are no longer refused by the server as a replay (401 "Replay attack detected"); before, a transient 429 or 5xx could surface as `SmallPictError::Unauthorized`.
 - `Idempotency-Key` is generated once per call and kept across retries instead of once per attempt.

@@ -232,7 +232,9 @@ pub(crate) fn is_purge_rate_limited(body: &[u8]) -> bool {
 pub(crate) fn upload_failed(status: u16, body: &str) -> SmallPictError {
     let mut message = format!("Upload to staging failed with HTTP {status}");
     if !body.is_empty() {
-        message = format!("{message}: {body}");
+        // An S3 error document runs to kilobytes and repeats the pre-signed query; keep the head.
+        let head: String = body.chars().take(300).collect();
+        message = format!("{message}: {head}");
     }
     SmallPictError::Optimize {
         code: "upload_failed".into(),

@@ -126,7 +126,10 @@ impl BlockingClient {
             .header(CONTENT_LENGTH, data.len())
             .body(data.to_vec())
             .timeout(self.timeout)
-            .send()?;
+            .send()
+            .map_err(|e| SmallPictError::Network {
+                source: e.without_url(),
+            })?;
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().unwrap_or_default();
