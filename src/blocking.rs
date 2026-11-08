@@ -1,3 +1,7 @@
+//! Blocking client for code that is not async. Do not build or use it inside a tokio runtime:
+//! `reqwest::blocking` panics there. Use [`crate::Client`] from async code, or wrap the call in
+//! `tokio::task::spawn_blocking`.
+
 use crate::errors::{
     job_failed, job_timeout, reject_url_source, upload_failed, SecretRedacted, SmallPictError,
 };

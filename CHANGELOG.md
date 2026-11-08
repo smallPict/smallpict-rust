@@ -76,6 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0] - 2026-08-22
 
+Never published: crates.io has 0.0.3 to 0.0.7, then 0.1.0. The numbering restarted under the current crate.
+
 ### Added
 - Official Rust SDK implementation for SmallPict OpenAPI 3.1.0 API.
 - Zero-leak credential security with `SecretRedacted<T>` wrapper and regex masking in `Display` and `Debug`.

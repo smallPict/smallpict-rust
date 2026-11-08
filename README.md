@@ -25,14 +25,14 @@ In your `Cargo.toml`:
 
 ```toml
 [dependencies]
-smallpict = "1.0"
+smallpict = "0.1"
 ```
 
 To enable synchronous / blocking mode:
 
 ```toml
 [dependencies]
-smallpict = { version = "1.0", features = ["blocking"] }
+smallpict = { version = "0.1", features = ["blocking"] }
 ```
 
 ---
@@ -70,6 +70,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 ### 2. Synchronous / Blocking Example
+
+Do not create or call a `BlockingClient` inside a tokio runtime (an axum or tonic handler, a `#[tokio::main]` function): `reqwest::blocking` panics there. Use `Client` from async code, or run the blocking call with `tokio::task::spawn_blocking`.
 
 ```rust
 use smallpict::blocking::BlockingClient;
@@ -214,7 +216,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ## 🔒 Security & Schema Compatibility (2026)
 
-- **`mime_type` & `content_type` Dual Support**: `OptimizeOptions` and `OptimizeOptionsBuilder` support both `mime_type` and `content_type` fields. Requests submitted via async `SmallPictClient` and blocking `SmallPictBlockingClient` send both `mime_type` and `content_type`, guaranteeing 100% backward and forward compatibility with all SmallPict API versions.
+- **`mime_type` & `content_type` Dual Support**: `OptimizeOptions` and `OptimizeOptionsBuilder` support both `mime_type` and `content_type` fields. Requests submitted via the async `Client` and the `BlockingClient` send both `mime_type` and `content_type`, guaranteeing 100% backward and forward compatibility with all SmallPict API versions.
 
 ---
 

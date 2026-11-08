@@ -34,7 +34,7 @@
 //! Enable the `blocking` feature in `Cargo.toml`:
 //! ```toml
 //! [dependencies]
-//! smallpict = { version = "1.0", features = ["blocking"] }
+//! smallpict = { version = "0.1", features = ["blocking"] }
 //! ```
 //!
 //! ```no_run
