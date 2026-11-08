@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Features: the `async` feature enables only `tokio`, `blocking` only `reqwest/blocking`, so `rustls-tls` and `native-tls` are independent (before, both forced rustls and `native-tls` could not turn it off). The library no longer asks for reqwest `stream` or tokio `macros`/`rt-multi-thread`, which it never used. Default features are unchanged (`async`, `rustls-tls`).
 - Internal: request preparation (path, body, idempotency key), per-attempt signed headers and the retry-or-fail decision live once in a crate-private `request` module; `Client` and `BlockingClient` keep only their send loop. The two 210-line `request()` copies are gone. No behaviour change.
 
 ### Fixed

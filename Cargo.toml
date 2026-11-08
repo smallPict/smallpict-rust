@@ -14,14 +14,14 @@ categories = ["web-programming::http-client", "multimedia::images", "api-binding
 
 [features]
 default = ["async", "rustls-tls"]
-async = ["tokio", "reqwest/rustls-tls"]
-blocking = ["reqwest/blocking", "reqwest/rustls-tls"]
+async = ["tokio"]
+blocking = ["reqwest/blocking"]
 rustls-tls = ["reqwest/rustls-tls"]
 native-tls = ["reqwest/default-tls"]
 
 [dependencies]
-reqwest = { version = "0.11", default-features = false, features = ["json", "stream"] }
-tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "time", "fs"], optional = true }
+reqwest = { version = "0.11", default-features = false, features = ["json"] }
+tokio = { version = "1.0", features = ["time", "fs"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
