@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Release workflow runs `cargo test --all-features` before `cargo publish`; a tag on a commit that fails it no longer publishes. CI also builds on the declared `rust-version` (1.75.0) and runs `cargo audit`. Actions are pinned to commit SHAs.
+
 ## [0.1.0] - 2026-11-05
 
 ### Fixed
