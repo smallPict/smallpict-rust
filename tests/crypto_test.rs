@@ -56,3 +56,11 @@ fn secret_redacted_never_prints_a_server_issued_secret() {
     assert_eq!(format!("{:?}", secret), "[REDACTED]");
     assert!(!sanitize_message(&format!("bad key {raw}")).contains(&raw));
 }
+
+#[test]
+fn hmac_sha256_known_answer_rfc4231_case_2() {
+    assert_eq!(
+        crypto::hmac_sha256_hex("Jefe", "what do ya want for nothing?"),
+        "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+    );
+}

@@ -435,7 +435,11 @@ async fn bad_idempotency_key_is_a_validation_error_not_a_panic() {
 async fn redirects_are_not_followed_with_signed_headers() {
     let (url, rx) = server_with_headers(vec![
         (302, "", "Location: {URL}/elsewhere\r\n"),
-        (200, r#"{"plan":"free","bytes_used":0,"quota_limit":1}"#, ""),
+        (
+            200,
+            r#"{"plan":"free","bytes_used":0,"quota_limit":1,"quota_percentage":0.0}"#,
+            "",
+        ),
     ]);
     let err = client(&url).get_quota().await.unwrap_err();
     assert!(
@@ -444,4 +448,92 @@ async fn redirects_are_not_followed_with_signed_headers() {
     );
     next(&rx);
     assert!(rx.try_recv().is_err(), "the redirect was followed");
+}
+
+#[tokio::test]
+async fn request_signature_matches_the_recomputed_hmac() {
+    let (url, rx) = server(vec![(
+        200,
+        r#"{"plan":"free","bytes_used":0,"quota_limit":1,"quota_percentage":0.0}"#,
+    )]);
+    client(&url).get_quota().await.unwrap();
+    let req = next(&rx);
+    let ts = req.header("x-timestamp").expect("x-timestamp");
+    let expected = smallpict::crypto::hmac_sha256_hex(
+        "sec_test_abcdefgh",
+        &smallpict::crypto::build_string_to_sign(
+            "GET",
+            &req.path,
+            ts,
+            smallpict::crypto::EMPTY_SHA256,
+        ),
+    );
+    assert_eq!(req.header("x-signature"), Some(expected.as_str()));
+    assert_eq!(req.header("x-api-key"), Some("sp_sdk_test_1234567890"));
+}
+
+#[tokio::test]
+async fn statuses_401_404_500_map_to_their_variants() {
+    for (status, check) in [
+        (
+            401u16,
+            (|e: &SmallPictError| matches!(e, SmallPictError::Unauthorized { .. }))
+                as fn(&SmallPictError) -> bool,
+        ),
+        (404, |e| matches!(e, SmallPictError::NotFound { .. })),
+        (500, |e| {
+            matches!(e, SmallPictError::Server { status: 500, .. })
+        }),
+    ] {
+        let (url, _rx) = server(vec![(status, r#"{"error":{"code":"X","message":"m"}}"#)]);
+        let err = client(&url).get_quota().await.unwrap_err();
+        assert!(check(&err), "status {status}: {err}");
+    }
+}
+
+#[tokio::test]
+async fn server_error_is_retried_and_retry_after_is_honoured() {
+    let (url, rx) = server_with_headers(vec![
+        (503, SERVER_ERROR, "Retry-After: 1\r\n"),
+        (
+            200,
+            r#"{"plan":"free","bytes_used":0,"quota_limit":1,"quota_percentage":0.0}"#,
+            "",
+        ),
+    ]);
+    let c = Client::builder()
+        .api_key("sp_sdk_test_1234567890")
+        .secret_key("sec_test_abcdefgh")
+        .base_url(url)
+        .max_retries(1)
+        .build()
+        .unwrap();
+    let started = std::time::Instant::now();
+    c.get_quota().await.unwrap();
+    assert!(
+        started.elapsed() >= Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
+    next(&rx);
+    next(&rx);
+    assert!(rx.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn optimize_file_sends_the_file_name() {
+    let dir = std::env::temp_dir().join(format!("smallpict-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("logo.png");
+    std::fs::write(&path, b"12345").unwrap();
+    let (url, rx) = server(vec![(202, QUEUED), (200, ""), (200, COMPLETED)]);
+    client(&url)
+        .optimize_file(path.to_str().unwrap(), png_opts())
+        .await
+        .unwrap();
+    let post = next(&rx);
+    let body: serde_json::Value = serde_json::from_slice(&post.body).unwrap();
+    assert_eq!(body["filename"], "logo.png");
+    assert_eq!(body["filesize"], 5);
+    std::fs::remove_dir_all(&dir).unwrap();
 }
