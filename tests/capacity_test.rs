@@ -188,6 +188,7 @@ async fn error_for(case: &Value) -> SmallPictError {
     );
     let client = Client::builder()
         .api_key("sp_sdk_test_1234567890")
+        .secret_key("sec_test_abcdefgh")
         .base_url(&url)
         .max_retries(0)
         .build()

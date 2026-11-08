@@ -63,6 +63,7 @@ fn mock_server(status: u16, body: &'static str) -> (String, mpsc::Receiver<Value
 fn client(url: &str) -> Client {
     Client::builder()
         .api_key("sp_sdk_test_1234567890")
+        .secret_key("sec_test_abcdefgh")
         .base_url(url)
         .max_retries(0)
         .poll_interval(Duration::from_millis(1))
@@ -201,6 +202,7 @@ fn blocking_client_maps_deprecated_flag() {
     let (url, rx) = mock_server(200, OK);
     let c = smallpict::BlockingClient::builder()
         .api_key("sp_sdk_test_1234567890")
+        .secret_key("sec_test_abcdefgh")
         .base_url(url)
         .max_retries(0)
         .poll_interval(Duration::from_millis(1))

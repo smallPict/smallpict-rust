@@ -34,8 +34,32 @@ fn test_blocking_client_builder() {
 
     let client = BlockingClient::builder()
         .api_key("sp_sdk_test_blocking_12345")
+        .secret_key("sec_test_abcdefgh")
         .build()
         .expect("valid blocking client");
 
     assert!(!client.validate_key());
+}
+
+#[test]
+fn builder_without_secret_key_is_validation_error() {
+    let err = ClientBuilder::new()
+        .api_key("sp_sdk_test_1234567890")
+        .secret_key("")
+        .build()
+        .unwrap_err();
+    assert!(err.is_validation_error(), "{err}");
+    assert!(err.to_string().contains("secret key"), "{err}");
+}
+
+#[cfg(feature = "blocking")]
+#[test]
+fn blocking_builder_without_secret_key_is_validation_error() {
+    let err = smallpict::BlockingClient::builder()
+        .api_key("sp_sdk_test_1234567890")
+        .secret_key("")
+        .build()
+        .unwrap_err();
+    assert!(err.is_validation_error(), "{err}");
+    assert!(err.to_string().contains("secret key"), "{err}");
 }

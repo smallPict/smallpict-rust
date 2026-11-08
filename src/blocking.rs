@@ -22,7 +22,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct BlockingClient {
     pub(crate) api_key: SecretRedacted<String>,
-    pub(crate) secret_key: Option<SecretRedacted<String>>,
+    pub(crate) secret_key: SecretRedacted<String>,
     pub(crate) base_url: String,
     pub(crate) timeout: Duration,
     pub(crate) max_retries: u32,
@@ -33,7 +33,8 @@ pub struct BlockingClient {
 }
 
 impl BlockingClient {
-    /// Create a new synchronous Client using an API key and default options.
+    /// Create a new synchronous Client with default options. The secret key is read from
+    /// `SMALLPICT_SECRET_KEY`; use [`BlockingClient::builder`] to pass it explicitly.
     pub fn new(api_key: impl Into<String>) -> Result<Self, SmallPictError> {
         BlockingClientBuilder::new().api_key(api_key).build()
     }
@@ -269,34 +270,21 @@ impl BlockingClient {
                 headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
             }
 
-            if let Some(ref sec) = self.secret_key {
-                let string_to_sign = crypto::build_string_to_sign(
-                    method.as_str(),
-                    &normalized_path,
-                    &now_sec,
-                    &body_hash,
-                );
-                let signature = crypto::hmac_sha256_hex(&sec.0, &string_to_sign);
-
-                headers.insert(
-                    HeaderName::from_static("x-timestamp"),
-                    HeaderValue::from_str(&now_sec).expect("valid ascii"),
-                );
-                headers.insert(
-                    HeaderName::from_static("x-signature"),
-                    HeaderValue::from_str(&signature).expect("valid ascii"),
-                );
-            } else {
-                headers.insert(
-                    reqwest::header::AUTHORIZATION,
-                    HeaderValue::from_str(&format!("Bearer {}", self.api_key.0)).map_err(|_| {
-                        SmallPictError::Validation {
-                            message: "Invalid characters in API key".into(),
-                            details: None,
-                        }
-                    })?,
-                );
-            }
+            let string_to_sign = crypto::build_string_to_sign(
+                method.as_str(),
+                &normalized_path,
+                &now_sec,
+                &body_hash,
+            );
+            let signature = crypto::hmac_sha256_hex(&self.secret_key.0, &string_to_sign);
+            headers.insert(
+                HeaderName::from_static("x-timestamp"),
+                HeaderValue::from_str(&now_sec).expect("valid ascii"),
+            );
+            headers.insert(
+                HeaderName::from_static("x-signature"),
+                HeaderValue::from_str(&signature).expect("valid ascii"),
+            );
 
             // The server rejects a repeated signature as a replay unless the nonce differs.
             headers.insert(
@@ -519,6 +507,14 @@ impl BlockingClientBuilder {
             });
         }
 
+        let secret = self
+            .secret_key
+            .filter(|s| !s.trim().is_empty())
+            .ok_or_else(|| SmallPictError::Validation {
+                message: "Missing required SmallPict secret key. Provide `.secret_key(...)` or set SMALLPICT_SECRET_KEY environment variable.".into(),
+                details: None,
+            })?;
+
         let base = self
             .base_url
             .unwrap_or_else(|| "https://api.smallpict.app".to_string());
@@ -530,7 +526,7 @@ impl BlockingClientBuilder {
 
         Ok(BlockingClient {
             api_key: SecretRedacted(key),
-            secret_key: self.secret_key.map(SecretRedacted),
+            secret_key: SecretRedacted(secret),
             base_url: base,
             timeout: self.timeout,
             max_retries: self.max_retries,

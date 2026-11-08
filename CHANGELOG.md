@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Idempotency-Key` is generated once per call and kept across retries instead of once per attempt.
 
 ### Changed
+- **`secret_key` is required.** `ClientBuilder::build()` and `BlockingClientBuilder::build()` return `SmallPictError::Validation` when neither `.secret_key(...)` nor `SMALLPICT_SECRET_KEY` is set. The Bearer-only mode (API key without signature) is gone: the API refuses it with 403, so a client built that way never worked. `Client::new(api_key)` still reads the secret from the environment. README and crate docs pass both keys.
 - Release workflow runs `cargo test --all-features` before `cargo publish`; a tag on a commit that fails it no longer publishes. CI also builds on the declared `rust-version` (1.75.0) and runs `cargo audit`. Actions are pinned to commit SHAs.
 
 ## [0.1.0] - 2026-11-05

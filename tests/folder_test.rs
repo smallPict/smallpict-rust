@@ -70,6 +70,7 @@ fn mock_server(
 fn client(url: &str, retries: u32) -> Client {
     Client::builder()
         .api_key("sp_sdk_test_1234567890")
+        .secret_key("sec_test_abcdefgh")
         .base_url(url)
         .max_retries(retries)
         .poll_interval(Duration::from_millis(1))
@@ -219,6 +220,7 @@ fn blocking_client_folder_purge_and_no_retry() {
     let c = |url: String| {
         smallpict::BlockingClient::builder()
             .api_key("sp_sdk_test_1234567890")
+            .secret_key("sec_test_abcdefgh")
             .base_url(url)
             .max_retries(3)
             .poll_interval(Duration::from_millis(1))

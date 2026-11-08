@@ -177,6 +177,7 @@ async fn job_still_running_after_wait_timeout_is_timeout_naming_the_job() {
     let (url, _rx) = server(vec![(202, QUEUED), (200, ""), (200, PROCESSING)]);
     let c = Client::builder()
         .api_key("sp_sdk_test_1234567890")
+        .secret_key("sec_test_abcdefgh")
         .base_url(&url)
         .max_retries(0)
         .poll_interval(Duration::from_millis(1))
@@ -238,6 +239,7 @@ fn blocking_client_uploads_then_polls() {
     ]);
     let c = smallpict::BlockingClient::builder()
         .api_key("sp_sdk_test_1234567890")
+        .secret_key("sec_test_abcdefgh")
         .base_url(url)
         .max_retries(0)
         .poll_interval(Duration::from_millis(1))
@@ -252,6 +254,7 @@ fn blocking_client_uploads_then_polls() {
     let (url, _rx) = server(vec![(202, QUEUED), (200, ""), (200, FAILED)]);
     let c = smallpict::BlockingClient::builder()
         .api_key("sp_sdk_test_1234567890")
+        .secret_key("sec_test_abcdefgh")
         .base_url(url)
         .max_retries(0)
         .poll_interval(Duration::from_millis(1))

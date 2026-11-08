@@ -12,7 +12,7 @@ Official Rust SDK for the [SmallPict Image Optimization API](https://smallpict.a
 
 - **🦀 Pure Rust TLS Stack:** Uses `rustls-tls` by default to avoid OpenSSL C-runtime issues.
 - **⚡ Dual Asynchronous & Blocking Modes:** High-concurrency `tokio` async client and optional sync `BlockingClient`.
-- **🛡️ Secure HMAC-SHA256 & Bearer Auth:** Tamper-proof payload verification.
+- **🛡️ HMAC-SHA256 request signing:** every request is signed with your secret key; both `api_key` and `secret_key` are required.
 - **✨ 4 Core Unified Methods:** `optimize()` (uploads the image and waits for the finished job), `get_quota()`, `purge_cdn()`, and `validate_key()`.
 - **🔄 Resilience & Fault Tolerance:** Automatic `Idempotency-Key` UUID injection, 30s timeouts, and exponential backoff with jitter on HTTP 429/5xx.
 - **🔒 Zero-Leak Privacy:** API keys and credentials are automatically wrapped in `SecretRedacted` and masked in `Display`, `Debug`, and error logs.
@@ -49,7 +49,7 @@ use std::fs;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::builder()
         .api_key(std::env::var("SMALLPICT_API_KEY")?)
-        .secret_key(std::env::var("SMALLPICT_SECRET_KEY").ok()) // Optional HMAC Secret
+        .secret_key(std::env::var("SMALLPICT_SECRET_KEY")?)
         .build()?;
 
     let image_bytes = fs::read("hero-banner.png")?;
@@ -77,7 +77,10 @@ use smallpict::models::{ImageFormat, OptimizeOptions};
 use std::fs;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = BlockingClient::new("sp_sdk_your_api_key")?;
+    let client = BlockingClient::builder()
+        .api_key(std::env::var("SMALLPICT_API_KEY")?)
+        .secret_key(std::env::var("SMALLPICT_SECRET_KEY")?)
+        .build()?;
     let image_bytes = fs::read("hero-banner.png")?;
 
     let result = client.optimize(&image_bytes, None)?;

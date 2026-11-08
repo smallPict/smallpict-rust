@@ -10,7 +10,10 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = Client::new("sp_sdk_your_api_key")?;
+//!     let client = Client::builder()
+//!         .api_key(std::env::var("SMALLPICT_API_KEY")?)
+//!         .secret_key(std::env::var("SMALLPICT_SECRET_KEY")?)
+//!         .build()?;
 //!     let image_data = std::fs::read("hero.png")?;
 //!
 //!     let options = OptimizeOptions::builder()
@@ -40,7 +43,10 @@
 //!     use smallpict::blocking::BlockingClient;
 //!     use smallpict::models::{ImageFormat, OptimizeOptions};
 //!
-//!     let client = BlockingClient::new("sp_sdk_your_api_key")?;
+//!     let client = BlockingClient::builder()
+//!         .api_key(std::env::var("SMALLPICT_API_KEY")?)
+//!         .secret_key(std::env::var("SMALLPICT_SECRET_KEY")?)
+//!         .build()?;
 //!     let image_data = std::fs::read("hero.png")?;
 //!     let result = client.optimize(&image_data, None)?;
 //!     println!("CDN URL: {}", result.url);
