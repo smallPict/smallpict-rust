@@ -301,7 +301,10 @@ impl BlockingClient {
             ) {
                 headers.insert(
                     HeaderName::from_static("idempotency-key"),
-                    HeaderValue::from_str(&idemp).expect("valid uuid"),
+                    HeaderValue::from_str(&idemp).map_err(|_| SmallPictError::Validation {
+                        message: "idempotency_key must be visible ASCII".into(),
+                        details: None,
+                    })?,
                 );
             }
 
@@ -535,6 +538,7 @@ impl BlockingClientBuilder {
 
         let http_client = ReqwestBlockingClient::builder()
             .timeout(self.timeout)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(SmallPictError::from)?;
 

@@ -71,6 +71,7 @@ fn server_with_headers(
             });
             let (status, reply, extra) = replies[i.min(replies.len() - 1)];
             let reply = reply.replace("{URL}", &base);
+            let extra = extra.replace("{URL}", &base);
             let mut stream = stream;
             write!(
                 stream,
@@ -414,4 +415,33 @@ async fn retry_after_header_is_capped() {
         "{:?}",
         started.elapsed()
     );
+}
+
+#[tokio::test]
+async fn bad_idempotency_key_is_a_validation_error_not_a_panic() {
+    let (url, _rx) = server(vec![(202, QUEUED)]);
+    let opts = OptimizeOptions::builder()
+        .mime_type("image/png")
+        .idempotency_key("order\n42")
+        .build();
+    let err = client(&url)
+        .optimize(b"12345", Some(opts))
+        .await
+        .unwrap_err();
+    assert!(err.is_validation_error(), "{err}");
+}
+
+#[tokio::test]
+async fn redirects_are_not_followed_with_signed_headers() {
+    let (url, rx) = server_with_headers(vec![
+        (302, "", "Location: {URL}/elsewhere\r\n"),
+        (200, r#"{"plan":"free","bytes_used":0,"quota_limit":1}"#, ""),
+    ]);
+    let err = client(&url).get_quota().await.unwrap_err();
+    assert!(
+        matches!(err, SmallPictError::Server { status: 302, .. }),
+        "{err}"
+    );
+    next(&rx);
+    assert!(rx.try_recv().is_err(), "the redirect was followed");
 }

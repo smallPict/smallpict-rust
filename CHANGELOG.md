@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Redirects are no longer followed. reqwest kept `X-API-Key`, `X-Timestamp`, `X-Signature` and `Idempotency-Key` on a cross-host redirect and re-sent the image body on a 307, so a redirecting proxy or base URL could receive a valid signed request. A 3xx now surfaces as `SmallPictError::Server` with that status.
+- An `idempotency_key` with a control or non-ASCII character returns `SmallPictError::Validation` instead of panicking inside `optimize()`.
 - Retry waits are capped. `Retry-After: 3600` used to park the task or thread for an hour per attempt, and `max_retries(32)` or more overflowed the backoff shift (a panic in debug builds). The wait is now at most `max_retry_delay` (new builder option, default 30 s) and the exponent stops at 2^10.
 - A transport failure during the upload PUT no longer puts the pre-signed S3 URL (with its `X-Amz-Signature`) into the `Network` error message; whoever read the log could have overwritten the staging object. The `upload_failed` message keeps at most 300 characters of the storage body.
 - `SecretRedacted`'s `Display` prints `[REDACTED]` like `Debug`. It used to run the message sanitizer, whose pattern knew only `sec_`/`secret_` fixtures, so `println!("{}", secret)` printed a real `sps_...` secret in full. `sanitize_message` now masks `sps_...` secrets too.
