@@ -5,7 +5,9 @@ All notable changes to the `smallpict` crate will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.8] - Unreleased
+
+Next release after v0.0.7. It includes the changes first written up as 0.1.0, which was never tagged or published.
 
 ### Changed
 - HTTP stack moved to reqwest 0.12 (hyper 1, rustls 0.23). reqwest 0.11 and rustls 0.21 no longer receive releases, so the next TLS or HTTP/2 advisory would have had no fix. No API change for callers; the `rustls-tls`, `native-tls` and `blocking` features keep their names. `rust-version` stays 1.75.0: the CI MSRV job resolves the lockfile with the MSRV-aware resolver first, because the newest `icu_*` and `zeroize` releases (pulled through `url`) need Rust 1.85 or newer while older releases that fit 1.75 exist.
@@ -29,8 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **`secret_key` is required.** `ClientBuilder::build()` and `BlockingClientBuilder::build()` return `SmallPictError::Validation` when neither `.secret_key(...)` nor `SMALLPICT_SECRET_KEY` is set. The Bearer-only mode (API key without signature) is gone: the API refuses it with 403, so a client built that way never worked. `Client::new(api_key)` still reads the secret from the environment. README and crate docs pass both keys.
 - Release workflow runs `cargo test --all-features` before `cargo publish`; a tag on a commit that fails it no longer publishes. CI also builds on the declared `rust-version` (1.75.0) and runs `cargo audit`. Actions are pinned to commit SHAs.
-
-## [0.1.0] - 2026-11-05
 
 ### Fixed
 - **`optimize()` now returns an optimized image.** `POST /v1/optimize` only queues the job and returns a pre-signed `upload_url`; the SDK stopped there, so the worker failed every job with "client upload never arrived" and callers got an empty `url` with 0 % saved. `Client::optimize()` and `BlockingClient::optimize()` now PUT the bytes to `upload_url` (plain PUT with `Content-Type` and `Content-Length` as sent, no API headers, no retry), poll `GET /v1/optimize/status` every `poll_interval` (default 1 s) and return once the job is `completed`, with `url`, `format`, `bytes_saved`, `mode_applied`, `quality_applied` and `folder` from the job status (`SDK_SPEC.md` section 3d).
@@ -79,7 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0] - 2026-08-22
 
-Never published: crates.io has 0.0.3 to 0.0.7, then 0.1.0. The numbering restarted under the current crate.
+Never published: crates.io has 0.0.1 to 0.0.7 (no 0.0.4). The numbering restarted under the current crate.
 
 ### Added
 - Official Rust SDK implementation for SmallPict OpenAPI 3.1.0 API.
